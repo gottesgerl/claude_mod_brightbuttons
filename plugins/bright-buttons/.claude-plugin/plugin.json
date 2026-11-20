@@ -1,6 +1,6 @@
 {
   "name": "bright-buttons",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "Coloured buttons and previews above the prompt for the paths in Claude's replies: left click opens (folders, media, 3D files and text: the system default app or one you choose), right click copies the path, hover shows the file name. Beside them, each switchable in the settings: a thumb that sends \"Yes, please\" in the chosen language, ⌾ for /advisor (right click: model for this chat), C for /compact with the prompt cache's time filling it (right click: compact when idle), H asking for a handover (right click: full handover mode). Windows, macOS, Linux. /bright-buttons or a right click on the thumb opens the settings.",
   "author": {
     "name": "gottesgerl"

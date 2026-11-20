@@ -350,7 +350,17 @@ let chatLoaded = ''
 // compacted if its context is at least idlePercent full. The API's cache has run out by then,
 // so the next message would read the whole chat anew anyway; compacted, it starts small.
 // Both figures are settings (the settings pane), for every chat alike.
-let isIdleCompact = false
+// What C does on its own, per chat (a right click on C picks it): nothing (manual), compact when idle,
+// or auto-renew: a minute before the cache runs out, a short message keeps it alive (renewMax times
+// in a row at most; a message of the person's counts again from 0).
+const C_MODES = ['manual', 'idle', 'renew'] as const
+type CMode = (typeof C_MODES)[number]
+const C_MODE_NAMES: Record<CMode, string> = { manual: 'Manual', idle: 'Compact when idle', renew: 'Auto-renew' }
+let cMode: CMode = 'manual'
+let isPickingMode = false
+let renewCount = 0
+let isRenewSent = false
+const RENEW_TEXT = 'Cache keep-alive, nothing to do. Reply with just: ok'
 let isTurnRunning = false
 let idleTimer: { cancel: () => void } | undefined
 
@@ -388,6 +398,7 @@ type HandoffConfig = {
   idleMinutes: number
   idlePercent: number
   cacheMinutes: number
+  renewMax: number
   language: Language
   advisorModel: Model
   textRoom: number
@@ -400,6 +411,7 @@ const cfg: HandoffConfig = {
   idleMinutes: 60,
   idlePercent: 50,
   cacheMinutes: 60,
+  renewMax: 5,
   language: 'en',
   advisorModel: 'opus',
   textRoom: 18,
@@ -421,12 +433,14 @@ function hintText(id: ButtonId) {
     return 'Advisor (' + MODEL_NAMES[advisorModel] + ')'
   }
   if (id === 'compact') {
-    return (isIdleCompact ? 'Compact (when idle)' : 'Compact') + (minutesShown > 0 ? ' · cache ' + minutesShown + ' min' : '')
+    const mode = cMode === 'idle' ? 'Compact (when idle)' : cMode === 'renew' ? 'Compact (auto-renew ' + renewCount + '/' + cfg.renewMax + ')' : 'Compact'
+    return mode + (minutesShown > 0 ? ' · cache ' + minutesShown + ' min' : isExpiredShown ? ' · cache expired' : '')
   }
   if (id === 'yes') {
     return yesText()
   }
-  return isFullHandover ? 'Full handover' : 'Handover'
+  const context = contextOf.get(chatLoaded)
+  return (isFullHandover ? 'Full handover' : 'Handover') + (context !== undefined && context > 0 ? ' · context ' + context + ' %' : '')
 }
 let hint: ButtonId | undefined
 // Narrower than this (columns), the band leaves the thumb out first.
@@ -434,7 +448,7 @@ const THUMB_LEAST = 64
 let lastIsWorking = false
 let lastBack: Back | undefined
 // Whether the thumb shows in a band this many columns wide.
-const thumbFits = (columns: number) => cfg.thumb && !isPicking && columns >= THUMB_LEAST
+const thumbFits = (columns: number) => cfg.thumb && !isPicking && !isPickingMode && columns >= THUMB_LEAST
 
 // The handover mode lasts from chat to chat; the advisor model and compact-when-idle belong to
 // one chat each (a new chat starts with the advisor model of the settings, without compact-when-idle).
@@ -450,9 +464,15 @@ async function loadState($: Engine) {
   chatLoaded = id
   const model = (await $.store.get('advisor-model:' + id)) as Model | undefined
   advisorModel = model !== undefined && MODELS.includes(model) ? model : cfg.advisorModel
-  const wasIdle = isIdleCompact
-  isIdleCompact = (await $.store.get('idle-compact:' + id)) === true
-  if (wasIdle && !isIdleCompact) {
+  const stored = (await $.store.get('c-mode:' + id)) as CMode | undefined
+  cMode = stored !== undefined && C_MODES.includes(stored)
+    ? stored
+    : (await $.store.get('idle-compact:' + id)) === true ? 'idle' : 'manual'
+  renewCount = 0
+  // Another chat: its own wait (none in manual mode).
+  if (!isTurnRunning) {
+    startIdle($)
+  } else {
     stopIdle()
   }
 }
@@ -529,24 +549,70 @@ const C_FIELD_R = 6
 const C_FIELD_GREY = '#e7e7e7'
 const C_LETTER_GREY = '#5c5c5c'
 const C_RED_PATH = 'M18.16 6.34 A8 8 0 1 0 18.16 17.66 L15.75 15.25 A4.6 4.6 0 1 1 15.75 8.75 Z'
-function cField(minutes: number, isRed: boolean) {
+const C_IDLE_RED = '#e5484d'
+const C_RENEW_GREEN = '#30a46c'
+// Cache expired: the C pale and a little left, a small "zz" beside it (the cache sleeps).
+const C_PALE_GREY = '#cfcfcf'
+const C_ZZ_GREY = '#b5b5b5'
+function cField(minutes: number, mode: CMode, isExpired = false) {
+  const isRed = mode !== 'manual'
+  const outline = mode === 'renew' ? C_RENEW_GREEN : C_IDLE_RED
   const w = C_FIELD_W
   const h = C_FIELD_H
   const left = Math.max(0, Math.min(cfg.cacheMinutes, minutes)) / cfg.cacheMinutes
   const top = (h * (1 - left)).toFixed(2)
+  const shift = isExpired ? -2 : 0
   const glyph = isRed
-    ? '<g transform="translate(' + ((w - 16) / 2) + ' ' + ((h - 16) / 2) + ') scale(0.6667)"><path fill="none" stroke="#e5484d" ' +
+    ? '<g transform="translate(' + ((w - 16) / 2 + shift) + ' ' + ((h - 16) / 2) + ') scale(0.6667)"' +
+      (isExpired ? ' opacity="0.45"' : '') + '><path fill="none" stroke="' + outline + '" ' +
       'stroke-width="1.6" stroke-linejoin="round" d="' + C_RED_PATH + '"/></g>'
-    : '<text x="' + (w / 2) + '" y="' + (h / 2) + '" text-anchor="middle" dominant-baseline="central" ' +
-      'font-family="Segoe UI, system-ui, -apple-system, sans-serif" font-size="14" fill="' + C_LETTER_GREY + '">C</text>'
+    : '<text x="' + (w / 2 + shift) + '" y="' + (h / 2) + '" text-anchor="middle" dominant-baseline="central" ' +
+      'font-family="Segoe UI, system-ui, -apple-system, sans-serif" font-size="14" fill="' +
+      (isExpired ? C_PALE_GREY : C_LETTER_GREY) + '">C</text>'
+  const zz = isExpired
+    ? '<text x="' + (w - 8.5) + '" y="9.5" font-family="Segoe UI, system-ui, sans-serif" font-style="italic" font-size="5.5" fill="' + C_ZZ_GREY + '">z</text>' +
+      '<text x="' + (w - 6) + '" y="6.2" font-family="Segoe UI, system-ui, sans-serif" font-style="italic" font-size="4" fill="' + C_PALE_GREY + '">z</text>'
+    : ''
   return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + w + ' ' + h + '">' +
     '<defs><clipPath id="field"><rect width="' + w + '" height="' + h + '" rx="' + C_FIELD_R + '"/></clipPath></defs>' +
     (left > 0 ? '<rect y="' + top + '" width="' + w + '" height="' + h + '" fill="' + C_FIELD_GREY + '" clip-path="url(#field)"/>' : '') +
     '<rect x="0.5" y="0.5" width="' + (w - 1) + '" height="' + (h - 1) + '" rx="' + (C_FIELD_R - 0.5) + '" fill="none" stroke="' +
     C_FIELD_GREY + '" stroke-width="1"/>' +
-    glyph + '</svg>'
+    glyph + zz + '</svg>'
+}
+// The H button drawn as C is: the context still free fills its field from the bottom (its top sinks
+// as the chat grows), and the letter takes a colour once the context is this full (percent).
+const H_STEPS: readonly (readonly [number, string])[] = [[75, '#e5484d'], [50, '#f08c00'], [33, '#3e7bd6'], [20, '#30a46c']]
+function hField(label: string, contextPercent: number) {
+  const w = C_FIELD_W
+  const h = C_FIELD_H
+  const used = Math.max(0, Math.min(100, contextPercent)) / 100
+  const top = (h * used).toFixed(2)
+  const colour = H_STEPS.find(([least]) => contextPercent >= least)?.[1] ?? C_LETTER_GREY
+  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + w + ' ' + h + '">' +
+    '<defs><clipPath id="hfield"><rect width="' + w + '" height="' + h + '" rx="' + C_FIELD_R + '"/></clipPath></defs>' +
+    (used < 1 ? '<rect y="' + top + '" width="' + w + '" height="' + h + '" fill="' + C_FIELD_GREY + '" clip-path="url(#hfield)"/>' : '') +
+    '<rect x="0.5" y="0.5" width="' + (w - 1) + '" height="' + (h - 1) + '" rx="' + (C_FIELD_R - 0.5) + '" fill="none" stroke="' +
+    C_FIELD_GREY + '" stroke-width="1"/>' +
+    '<text x="' + (w / 2) + '" y="' + (h / 2) + '" text-anchor="middle" dominant-baseline="central" ' +
+    'font-family="Segoe UI, system-ui, -apple-system, sans-serif" font-size="14" fill="' + colour + '">' + label + '</text></svg>'
 }
 let minutesShown = 0
+let isExpiredShown = false
+// How full the context is (percent) per chat, read after each reply and the first time a chat shows.
+const contextOf = new Map<string, number>()
+async function readContext($: Engine, id: string) {
+  try {
+    const { context } = await $.session.usage()
+    const percent = context.percent ?? (context.tokens === undefined ? 0 : Math.round(100 * context.tokens / context.window))
+    if (contextOf.get(id) !== percent) {
+      contextOf.set(id, percent)
+      $.ui.invalidate('ui.render')
+    }
+  } catch {
+    // no figures: no line
+  }
+}
 
 function stopIdle() {
   idleTimer?.cancel()
@@ -555,12 +621,16 @@ function stopIdle() {
 
 function startIdle($: Engine) {
   stopIdle()
-  if (!isIdleCompact) {
+  if (cMode === 'renew') {
+    void startRenew($)
+    return
+  }
+  if (cMode !== 'idle') {
     return
   }
   idleTimer = $.clock.after(cfg.idleMinutes * 60 * 1000, async () => {
     idleTimer = undefined
-    if (!isIdleCompact || isTurnRunning || isRunning) {
+    if (cMode !== 'idle' || isTurnRunning || isRunning) {
       return
     }
     try {
@@ -576,15 +646,54 @@ function startIdle($: Engine) {
   }) as { cancel: () => void }
 }
 
-async function toggleIdleCompact($: Engine) {
-  isIdleCompact = !isIdleCompact
-  await $.store.set('idle-compact:' + (await $.session.id()), isIdleCompact)
-  await log($, 'compact when idle: ' + isIdleCompact)
-  if (isIdleCompact && !isTurnRunning) {
+// Auto-renew: a minute before the cache's time (from the end of the last reply) is up, a short
+// message as the plugin's own keeps the cache alive. Only in the chat it was set for.
+async function startRenew($: Engine) {
+  const id = await $.session.id()
+  await cacheLeft($, id)
+  const from = cacheFrom.get(id) ?? 0
+  if (from <= 0 || cMode !== 'renew' || isTurnRunning) {
+    return
+  }
+  if (renewCount >= cfg.renewMax) {
+    await log($, 'auto-renew: ' + renewCount + ' in a row, stopped')
+    return
+  }
+  const wait = from + Math.max(1, cfg.cacheMinutes - 1) * 60000 - (await $.clock.now())
+  if (wait <= 0) {
+    // The cache is gone already (or about to be): renewing would write it anew.
+    return
+  }
+  stopIdle()
+  idleTimer = $.clock.after(wait, async () => {
+    idleTimer = undefined
+    if (cMode !== 'renew' || isTurnRunning || isRunning || (await $.session.id()) !== id) {
+      return
+    }
+    renewCount++
+    isRenewSent = true
+    await log($, 'auto-renew ' + renewCount + '/' + cfg.renewMax)
+    try {
+      await $.prompt.submit({ text: RENEW_TEXT })
+    } catch (error) {
+      isRenewSent = false
+      await log($, 'auto-renew error: ' + String(error))
+    }
+  }) as { cancel: () => void }
+}
+
+async function pickMode($: Engine, mode: CMode) {
+  isPickingMode = false
+  cMode = mode
+  renewCount = 0
+  await $.store.set('c-mode:' + (await $.session.id()), mode)
+  await log($, 'C mode: ' + mode)
+  if (!isTurnRunning) {
     startIdle($)
-  } else if (!isIdleCompact) {
+  } else {
     stopIdle()
   }
+  $.ui.invalidate('ui.render')
 }
 
 async function sayYes($: Engine) {
@@ -645,8 +754,10 @@ async function pickModel($: Engine, model: Model) {
 async function rightClick($: Engine, id: ButtonId) {
   if (id === 'advisor') {
     isPicking = !isPicking
+    isPickingMode = false
   } else if (id === 'compact') {
-    await toggleIdleCompact($)
+    isPickingMode = !isPickingMode
+    isPicking = false
   } else if (id === 'handover') {
     isFullHandover = !isFullHandover
     await $.store.set('full-handover', isFullHandover)
@@ -721,8 +832,19 @@ async function handoffBand($: Engine, e: any, ui: any, middle: any) {
   if (!cfg.advisor) {
     isPicking = false
   }
+  if (!cfg.compact) {
+    isPickingMode = false
+  }
+  const isMenu = isPicking || isPickingMode
   const minutesLeft = e.props.isWorking || !cfg.compact ? 0 : await cacheLeft($, id)
   minutesShown = minutesLeft
+  // Expired: a reply was cached once, its time is up, and nothing runs now.
+  const isExpired = cfg.compact && !e.props.isWorking && minutesLeft === 0 && (cacheFrom.get(id) ?? 0) > 0
+  isExpiredShown = isExpired
+  if ((cfg.compact || cfg.handover) && !contextOf.has(id)) {
+    contextOf.set(id, 0)
+    $.clock.after(0, () => void readContext($, id))
+  }
   if (minutesLeft > 0) {
     $.clock.after(0, () => tick($))
   }
@@ -735,8 +857,8 @@ async function handoffBand($: Engine, e: any, ui: any, middle: any) {
     <Box justifyContent="flex-end" alignItems="center" gap="sm">
       {isThumbHere && button('yes', '👍', THUMB)}
       {(isThumbHere || hint !== undefined) && hintOf(Box, Text, isThumbHere)}
-      {!isPicking && middle}
-      {!isPicking && back !== undefined && button('back', '<<')}
+      {!isMenu && middle}
+      {!isMenu && back !== undefined && button('back', '<<')}
       {/* After a right click on ⌾ the models stand left of it, the other buttons out of the way;
           the chosen model at full strength. */}
       {isPicking && MODELS.map(model => (
@@ -744,11 +866,18 @@ async function handoffBand($: Engine, e: any, ui: any, middle: any) {
           $.clock.after(0, () => void pickModel($, model))
         }} />
       ))}
-      {cfg.advisor && button('advisor', '⌾')}
-      {/* Compact when idle on: an outlined C in red. The cache's time fills its field from the bottom. */}
-      {!isPicking && cfg.compact && buttonOf($, ui, 'compact', 'C', cField(minutesLeft, isIdleCompact), false, C_FIELD_W, C_FIELD_H)}
+      {cfg.advisor && !isPickingMode && button('advisor', '⌾')}
+      {/* After a right click on C its modes stand left of it, the chosen one at full strength. */}
+      {isPickingMode && C_MODES.map(mode => (
+        <Button key={'cmode-' + mode} label={C_MODE_NAMES[mode]} plain dimColor={mode !== cMode} onPress={() => {
+          $.clock.after(0, () => void pickMode($, mode))
+        }} />
+      ))}
+      {/* Compact when idle: an outlined C in red, auto-renew in green. The cache's time fills its field from the bottom. */}
+      {!isPicking && cfg.compact && buttonOf($, ui, 'compact', 'C', cField(minutesLeft, cMode, isExpired), false, C_FIELD_W, C_FIELD_H)}
       {/* Full handover mode: ⤓ in place of H. */}
-      {!isPicking && cfg.handover && button('handover', isFullHandover ? '⤓' : 'H')}
+      {!isMenu && cfg.handover && buttonOf($, ui, 'handover', isFullHandover ? '⤓' : 'H',
+        hField(isFullHandover ? '⤓' : 'H', contextOf.get(id) ?? 0), false, C_FIELD_W, C_FIELD_H)}
     </Box>
   )
 }
@@ -769,6 +898,12 @@ function registerHandoff(on: Parameters<Register>[0]) {
     if ((e as any).agentId === undefined) {
       isTurnRunning = true
       stopIdle()
+      // A reply to the keep-alive keeps counting; anything else starts the count over.
+      if (isRenewSent) {
+        isRenewSent = false
+      } else {
+        renewCount = 0
+      }
     }
     return next(e)
   })
@@ -777,11 +912,12 @@ function registerHandoff(on: Parameters<Register>[0]) {
     if ((e as any).agentId === undefined) {
       isTurnRunning = false
       await loadState($)
-      startIdle($)
       const chat = await $.session.id()
       const now = await $.clock.now()
       cacheFrom.set(chat, now)
       await $.store.set('cache-from:' + chat, now)
+      void readContext($, chat)
+      startIdle($)
       tick($)
     }
     return next(e)
@@ -1039,13 +1175,14 @@ type Settings = {
   idleMinutes: number
   idlePercent: number
   cacheMinutes: number
+  renewMax: number
   language: Language
   advisorModel: Model
 }
 const DEFAULTS: Settings = {
   folderApp: '', mediaApp: '', threeDApp: '', previews: true, symbols: true, textRoom: 18,
   thumb: true, advisor: true, compact: true, handover: true,
-  idleMinutes: 60, idlePercent: 50, cacheMinutes: 60, language: 'en', advisorModel: 'opus',
+  idleMinutes: 60, idlePercent: 50, cacheMinutes: 60, renewMax: 5, language: 'en', advisorModel: 'opus',
 }
 let settings: Settings = { ...DEFAULTS }
 let isSettingsLoaded = false
@@ -1059,6 +1196,7 @@ function applySettings() {
   cfg.idleMinutes = settings.idleMinutes
   cfg.idlePercent = settings.idlePercent
   cfg.cacheMinutes = settings.cacheMinutes
+  cfg.renewMax = settings.renewMax
   cfg.language = LANGUAGES.includes(settings.language) ? settings.language : 'en'
   cfg.advisorModel = MODELS.includes(settings.advisorModel) ? settings.advisorModel : 'opus'
   cfg.textRoom = settings.textRoom
@@ -1082,15 +1220,15 @@ async function saveSettings($: Engine, change: Partial<Settings>) {
   settings = { ...settings, ...change }
   applySettings()
   await $.store.set('settings', settings)
-  if (change.idleMinutes !== undefined) {
+  if (change.idleMinutes !== undefined || change.cacheMinutes !== undefined || change.renewMax !== undefined) {
     idleChanged($)
   }
   $.ui.invalidate('ui.render')
 }
 
 // A whole number typed in the pane, kept when it lies in [least, most].
-async function saveNumber($: Engine, field: 'textRoom' | 'idleMinutes' | 'idlePercent' | 'cacheMinutes', text: string) {
-  const ranges = { textRoom: [8, 80], idleMinutes: [1, 600], idlePercent: [1, 100], cacheMinutes: [1, 600] } as const
+async function saveNumber($: Engine, field: 'textRoom' | 'idleMinutes' | 'idlePercent' | 'cacheMinutes' | 'renewMax', text: string) {
+  const ranges = { textRoom: [8, 80], idleMinutes: [1, 600], idlePercent: [1, 100], cacheMinutes: [1, 600], renewMax: [1, 48] } as const
   const [least, most] = ranges[field]
   const value = Math.round(Number(text.trim()))
   if (!Number.isFinite(value) || value < least || value > most) {
@@ -1634,7 +1772,8 @@ function buttonSettings($: Engine, ui: any, onOff: { value: string; label: strin
           }} />
         ))}
       </Box>
-      <Text dimColor>Compact when idle (right click on C, per chat): after a reply, with nothing new for this long, the chat is compacted if its context is this full. Enter saves.</Text>
+      <Text dimColor>A right click on C picks, per chat: Manual, Compact when idle (red C) or Auto-renew (green C).</Text>
+      <Text dimColor>Compact when idle: after a reply, with nothing new for this long, the chat is compacted if its context is this full. Enter saves.</Text>
       <Input
         key="idleMinutes"
         label="Minutes: "
@@ -1657,6 +1796,14 @@ function buttonSettings($: Engine, ui: any, onOff: { value: string; label: strin
         value={String(settings.cacheMinutes)}
         submitLabel="save"
         onSubmit={(value: string) => void saveNumber($, 'cacheMinutes', value)}
+      />
+      <Text dimColor>Auto-renew: a minute before these cache minutes are up, a short message keeps the cache alive. Each costs a cache read and a short reply; after this many in a row it stops until you write again.</Text>
+      <Input
+        key="renewMax"
+        label="At most in a row: "
+        value={String(settings.renewMax)}
+        submitLabel="save"
+        onSubmit={(value: string) => void saveNumber($, 'renewMax', value)}
       />
       <Text dimColor>Language: for now, what the thumb sends.</Text>
       <Box key="language-now" flexDirection="row" alignItems="center" gap="sm">

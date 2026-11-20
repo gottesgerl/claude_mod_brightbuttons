@@ -4,7 +4,7 @@ A band above the prompt for Claude Code (desktop app and terminal):
 
 - a coloured button per path from the latest replies, a small preview for images and videos; left click opens, right click copies the path (Windows, macOS and Linux),
 - a thumb at the band's left end that types "Yes, please",
-- `⌾` for `/advisor`, `C` for `/compact` with the prompt cache's time filling it, `H` asking for a handover (Windows for the full handover).
+- `⌾` for `/advisor`, `C` for `/compact` with the prompt cache's time filling it (and an auto-renew mode that keeps the cache alive), `H` asking for a handover with the free context filling it (Windows for the full handover).
 
 Each of the thumb, `⌾`, `C` and `H` can be switched off in the settings. Until version 0.10 the buttons on the right were a mod of their own, `handoff-button`; it is now part of `bright-buttons`.
 
@@ -85,6 +85,7 @@ In the band:
 - **Advisor model for new chats** (Opus at first).
 - **Compact when idle**: the minutes and the percent of context.
 - **Cache minutes**: how long the prompt cache holds after a reply (60 at first); the `C`'s grey field empties over this time. This sets only the display, not Claude's prompt cache.
+- **Auto-renew, at most in a row**: how many keep-alive messages are sent one after another (5 at first) before auto-renew waits for your next message.
 - **Language**, a list with small flags: English, Español, 中文, Français, Українська, 日本語, 한국어, Deutsch. For now it sets what the thumb sends.
 
 The settings are kept across sessions.
@@ -104,13 +105,13 @@ Three buttons on the right of the band and a thumb at its left end. Hovering sho
 | Button | Left click | Right click |
 | --- | --- | --- |
 | `⌾` | runs `/advisor` with the chosen model (the settings' advisor model at first) | shows `Fable Opus Sonnet Haiku` in the band, the other buttons out of the way; a pick turns the advisor on with that model for this chat |
-| `C` | runs `/compact` at once, without asking | turns compact when idle on or off for this chat: after a reply, with nothing new typed for 60 minutes (a setting), the chat is compacted if its context is at least half full; while on, the `C` is a red outline on its grey field. Its grey field doubles as an abstract hourglass: the part of the prompt cache's time (an hour at first, a setting) still left fills it from the bottom in the grey of the other buttons (the hint names the minutes) |
-| `H` | sends "Bitte schreib ein Handover." as if you had typed it | switches to full handover mode: the button shows `⤓`; another right click switches back |
+| `C` | runs `/compact` at once, without asking | shows three modes left of it for this chat: **Manual**; **Compact when idle** (red outline): after a reply, with nothing new typed for 60 minutes (a setting), the chat is compacted if its context is at least half full; **Auto-renew** (green outline): a minute before the cache's time is up, a short message from the mod ("Cache keep-alive, nothing to do. Reply with just: ok") keeps the prompt cache alive, each costing a cache read and a short reply. Its grey field doubles as an abstract hourglass: the part of the prompt cache's time still left fills it from the bottom (the hint names the minutes). Once the time is up the `C` turns pale with a small `zz`: the cache sleeps |
+| `H` | sends "Bitte schreib ein Handover." as if you had typed it | switches to full handover mode: the button shows `⤓`; another right click switches back. Its grey field shows the context still free, sinking from the top as the chat grows; the letter turns green from 20 % context, blue from 33 %, orange from 50 % and red from 75 % (the hint names the percent) |
 | thumb | sends "Yes, please" in the chosen language, as if you had typed it | opens the settings |
 
 When the band gets narrow, the thumb goes first.
 
-The advisor model and compact when idle are set per chat: a new chat starts with the settings' advisor model and without compact when idle. The handover mode stays from chat to chat. Claude Code's own auto-compact setting is left alone.
+The advisor model and the `C` mode are set per chat: a new chat starts with the settings' advisor model and in manual mode. The handover mode stays from chat to chat. Claude Code's own auto-compact setting is left alone.
 
 A right click on the thumb or `/bright-buttons` opens the settings.
 
