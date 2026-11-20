@@ -299,8 +299,8 @@ const ICONS: { test: (path: string) => boolean; draw: (colour: string) => string
       `<circle cx="12" cy="12.5" r="9" fill="${c}" mask="url(#spiral)"/>`,
   },
   {
-    // A Python script: a single prompt sign.
-    test: path => /\.pyw?$/i.test(path),
+    // A Python or other script: a single prompt sign.
+    test: path => /\.(pyw?|ps1|psm1|sh|bat|cmd|js|mjs|cjs|ts|tsx|jsx)$/i.test(path),
     draw: c =>
       `<path d="M8.5 7 L15.5 13 L8.5 19" fill="none" stroke="${c}" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>`,
   },
@@ -311,6 +311,35 @@ const ICONS: { test: (path: string) => boolean; draw: (colour: string) => string
       `<g fill="none" stroke="${c}" stroke-width="1.7" stroke-linecap="round">` +
       `<circle cx="12" cy="13" r="8.2"/><circle cx="12" cy="13" r="4.6"/><path stroke-width="1.5" d="M18.2 7.6 L15.4 10.2"/></g>` +
       `<circle cx="12" cy="13" r="1.5" fill="${c}"/>`,
+  },
+  {
+    // A video, until its preview is ready or where none can be made: a film reel.
+    test: path => VIDEO.test(path),
+    draw: c =>
+      `<path transform="translate(1 0.5)" fill="${c}" fill-rule="evenodd" d="M2.50 12.00a8.5 8.5 0 1 0 17.0 0a8.5 8.5 0 1 0 -17.0 0zM8.90 7.30a2.1 2.1 0 1 0 4.2 0a2.1 2.1 0 1 0 -4.2 0zM13.37 10.55a2.1 2.1 0 1 0 4.2 0a2.1 2.1 0 1 0 -4.2 0zM11.66 15.80a2.1 2.1 0 1 0 4.2 0a2.1 2.1 0 1 0 -4.2 0zM6.14 15.80a2.1 2.1 0 1 0 4.2 0a2.1 2.1 0 1 0 -4.2 0zM4.43 10.55a2.1 2.1 0 1 0 4.2 0a2.1 2.1 0 1 0 -4.2 0zM10.10 12.00a0.9 0.9 0 1 0 1.8 0a0.9 0.9 0 1 0 -1.8 0z"/>`,
+  },
+  {
+    // Data and settings (JSON, YAML, XML, INI, OCIO ...): a gear with eight short teeth and a small hole.
+    test: path => /\.(json|jsonl|json5|ya?ml|xml|toml|ini|cfg|conf|ocio|env)$/i.test(path),
+    draw: c =>
+      `<mask id="hub"><rect width="24" height="24" fill="#fff"/><circle cx="12" cy="12.5" r="1.5" fill="#000"/></mask>` +
+      `<g fill="${c}" mask="url(#hub)"><circle cx="12" cy="12.5" r="7"/>` +
+      `<rect x="10.4" y="4.2" width="3.2" height="2.3" rx="0.6" transform="rotate(0 12 12.5)"/><rect x="10.4" y="4.2" width="3.2" height="2.3" rx="0.6" transform="rotate(45 12 12.5)"/><rect x="10.4" y="4.2" width="3.2" height="2.3" rx="0.6" transform="rotate(90 12 12.5)"/><rect x="10.4" y="4.2" width="3.2" height="2.3" rx="0.6" transform="rotate(135 12 12.5)"/><rect x="10.4" y="4.2" width="3.2" height="2.3" rx="0.6" transform="rotate(180 12 12.5)"/><rect x="10.4" y="4.2" width="3.2" height="2.3" rx="0.6" transform="rotate(225 12 12.5)"/><rect x="10.4" y="4.2" width="3.2" height="2.3" rx="0.6" transform="rotate(270 12 12.5)"/><rect x="10.4" y="4.2" width="3.2" height="2.3" rx="0.6" transform="rotate(315 12 12.5)"/></g>`,
+  },
+  {
+    // A 3D exchange file (USD, glTF, FBX, OBJ, Alembic ...): a disc with the three edges of a cube's corner cut out.
+    test: path => /\.(usd|usda|usdc|usdz|glb|gltf|fbx|obj|abc|ply|stl)$/i.test(path),
+    draw: c =>
+      `<mask id="corner"><rect width="24" height="24" fill="#fff"/>` +
+      `<path d="M12 12.5L12.00 7.50M12 12.5L16.33 15.00M12 12.5L7.67 15.00" fill="none" stroke="#000" stroke-width="1.9" stroke-linecap="round"/></mask>` +
+      `<circle cx="12" cy="12.5" r="9.2" fill="${c}" mask="url(#corner)"/>`,
+  },
+  {
+    // A PDF: a filled page, its corner folded down.
+    test: path => /\.pdf$/i.test(path),
+    draw: c =>
+      `<g fill="${c}"><path d="M6.5 2.5H12.8V7.6a1.6 1.6 0 0 0 1.6 1.6H19.5V20a2 2 0 0 1-2 2H6.5a2 2 0 0 1-2-2V4.5a2 2 0 0 1 2-2z"/>` +
+      `<path stroke="${c}" stroke-width="0.8" stroke-linejoin="round" d="M14.3 2.9 L19.1 7.7 H14.3 Z"/></g>`,
   },
   {
     // Markdown and text: just two lines of text, a long one over a short one.
