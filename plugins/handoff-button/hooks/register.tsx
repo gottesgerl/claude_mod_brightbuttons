@@ -457,6 +457,27 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // Since the app draws one band row per mod, the rows are laid side by side again:
+  // path-buttons first, these buttons last, all on one line at the right.
+  on('ui.render', { component: 'AbovePromptList' }, async ($, e, next) => {
+    const rank = (plugin: string) => (plugin.includes('path-buttons') ? 0 : plugin.includes('handoff-button') ? 2 : 1)
+    const rows = [...e.props.rows].sort((a, b) => rank(a.plugin) - rank(b.plugin))
+    // Each row drawn on its own by the engine, then the drawn rows side by side in one Box.
+    if (e.props.hasSurvey || rows.length < 2) {
+      return next({ ...e, props: { ...e.props, rows } })
+    }
+    const drawn: any[] = []
+    for (const row of rows) {
+      drawn.push(await next({ ...e, props: { ...e.props, rows: [row] } }))
+    }
+    const { Box } = $.ui.resolve(e) as any
+    return (
+      <Box flexDirection="row" justifyContent="flex-end" alignItems="center" gap="sm">
+        {drawn}
+      </Box>
+    )
+  })
+
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) {
       return next(e)

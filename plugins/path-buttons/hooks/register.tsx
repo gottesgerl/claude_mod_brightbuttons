@@ -277,6 +277,55 @@ const thumbsPending = new Set<string>()
 const thumbsFailed = new Set<string>()
 // Letterbox colours in the order of the symbol lists (red, orange, green, blue, yellow, purple, white as grey).
 const FRAMES = ['#e0303a', '#f5821f', '#3cb44b', '#3a78d8', '#f2c40f', '#8e44ad', '#b0b0b0']
+
+// Flat symbols for the band in the path's colour, on a 24 x 24 grid; holes are cut, so any background shows through.
+const ICON_DRAWN = 22
+const ICONS: { test: (path: string) => boolean; draw: (colour: string) => string }[] = [
+  {
+    // A Blender file: the tilted ring with its eye and three arms, after the Blender logo.
+    test: path => /\.blend\d*$/i.test(path),
+    draw: c =>
+      `<g fill="${c}" stroke="${c}" stroke-width="2.1" stroke-linecap="round">` +
+      `<path stroke="none" fill-rule="evenodd" d="M6.8 14a7.7 7.2 0 1 0 15.4 0a7.7 7.2 0 1 0 -15.4 0z M9.6 13.1a4.6 3.9 0 1 0 9.2 0a4.6 3.9 0 1 0 -9.2 0z"/>` +
+      `<ellipse stroke="none" cx="14.3" cy="13.1" rx="2.8" ry="2.4"/>` +
+      `<path fill="none" d="M14 4.2 L18.2 9.2 M7.6 8.3 L16 8.3 M4.3 14.9 L9.6 10.2"/></g>`,
+  },
+  {
+    // A Houdini scene or asset: a disc with a spiral cut out of it.
+    test: path => /\.(hip|hiplc|hipnc|hda|hdalc|hdanc|otl)$/i.test(path),
+    draw: c =>
+      `<mask id="spiral"><circle cx="12" cy="12.5" r="9" fill="#fff"/>` +
+      `<path d="M8.6 14.3 L8.6 14.0 L8.7 13.6 L9.0 13.3 L9.3 13.1 L9.7 12.9 L10.2 12.8 L10.7 12.9 L11.2 13.2 L11.6 13.6 L12.0 14.1 L12.2 14.7 L12.2 15.4 L12.0 16.1 L11.6 16.8 L11.0 17.4 L10.3 17.8 L9.4 18.0 L8.5 18.0 L7.6 17.7 L6.8 17.2 L6.1 16.4 L5.6 15.5 L5.3 14.4 L5.4 13.2 L5.8 12.1 L6.5 11.1 L7.4 10.3 L8.6 9.7 L9.9 9.5 L11.2 9.6 L12.5 10.1 L13.7 10.9 L14.7 12.0 L15.3 13.4 L15.6 14.9 L15.4 16.5 L14.8 18.0 L13.9 19.3 L12.6 20.4 L11.0 21.1 L9.2 21.4 L7.5 21.2 L5.7 20.5 L4.2 19.4 L3.0 17.9 L2.2 16.2 L2.0 14.2 L2.2 12.2" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round"/></mask>` +
+      `<circle cx="12" cy="12.5" r="9" fill="${c}" mask="url(#spiral)"/>`,
+  },
+  {
+    // A Python script: a single prompt sign.
+    test: path => /\.pyw?$/i.test(path),
+    draw: c =>
+      `<path d="M8.5 7 L15.5 13 L8.5 19" fill="none" stroke="${c}" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>`,
+  },
+  {
+    // A log file: a slice of a tree trunk, rings, heart and a crack.
+    test: path => /\.log$/i.test(path),
+    draw: c =>
+      `<g fill="none" stroke="${c}" stroke-width="1.7" stroke-linecap="round">` +
+      `<circle cx="12" cy="13" r="8.2"/><circle cx="12" cy="13" r="4.6"/><path stroke-width="1.5" d="M18.2 7.6 L15.4 10.2"/></g>` +
+      `<circle cx="12" cy="13" r="1.5" fill="${c}"/>`,
+  },
+  {
+    // Markdown and text: just two lines of text, a long one over a short one.
+    test: path => TEXT.test(path),
+    draw: c =>
+      `<g fill="${c}"><rect x="3" y="9.5" width="16" height="2.5" rx="1.25"/><rect x="3" y="15.5" width="12" height="2.5" rx="1.25"/></g>`,
+  },
+  {
+    // A folder: no extension on the last part.
+    test: path => !/\.[A-Za-z0-9]{1,5}$/.test(path.split('\\').filter(part => part !== '').pop() ?? ''),
+    draw: c =>
+      // Drawn at four fifths and a little low, so it stands no bigger than a dot and sits on the line.
+      `<path transform="translate(2.4 3.9) scale(0.8)" fill="${c}" d="M2 6.5A1.5 1.5 0 0 1 3.5 5h5l2 2h10A1.5 1.5 0 0 1 22 8.5v10a1.5 1.5 0 0 1-1.5 1.5h-17A1.5 1.5 0 0 1 2 18.5z"/>`,
+  },
+]
 let FFMPEG = ''
 let isFfmpegResolved = false
 
@@ -544,6 +593,24 @@ export const register: Register = (on, options) => {
         </Box>
       )
     }
+    // Blender files, text files and folders show a flat symbol in their colour; a click works as on a dot.
+    const iconOf = (path: string, i: number) => {
+      const icon = Svg === undefined || Client === undefined ? undefined : ICONS.find(one => one.test(path))
+      if (icon === undefined) {
+        return null
+      }
+      const colour = FRAMES[colours.get(path.toLowerCase()) ?? 0]
+      const source =
+        `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">${icon.draw(colour)}</svg>`
+      return (
+        <Box key={'icon-box-' + i} position="relative" marginX="xs" flexShrink={0}>
+          <Svg key={'icon-' + i} source={source} alt={dotFor(path) + ' ' + (path.split('\\').pop() ?? path)} width={ICON_DRAWN} height={ICON_DRAWN} />
+          <Box position="absolute" top={0} left={0} right={0} bottom={0}>
+            <Client key={'hit-' + i} module="./hit.tsx" props={{ path, label: ' ' }} width="100%" height="100%" />
+          </Box>
+        </Box>
+      )
+    }
     const buttons = (
       <Box justifyContent="flex-end" alignItems="center">
         {(copiedNote !== undefined || (hovered !== undefined && paths.includes(hovered))) && (
@@ -552,7 +619,7 @@ export const register: Register = (on, options) => {
             <Text dimColor wrap="truncate-middle">{copiedNote ?? hovered?.split('\\').filter(part => part !== '').pop() ?? hovered}</Text>
           </Box>
         )}
-        {paths.map((path, i) => previewOf(path, i) ?? (Client !== undefined ? (
+        {paths.map((path, i) => previewOf(path, i) ?? iconOf(path, i) ?? (Client !== undefined ? (
           // A symbol as a region of hit.tsx: left click opens, right click shows the path.
           // Symbols get room on both sides; previews stay close together.
           <Box key={'hit-box-' + i} marginX="xs" flexShrink={0}>

@@ -72,6 +72,8 @@ Die Buttons zeigen die Pfade der letzten Antworten, die neuesten links, höchste
 
 In der Leiste:
 - **Bilder und Videos** erscheinen als kleines, helles Schwarz-Weiß-Vorschaubild mit abgerundeten Ecken und einem Balken in der Farbe ihres Symbols oben und unten. Videos zeigen das Bild bei Sekunde 1. Die Vorschau erzeugt `ffmpeg` (gesucht unter `Program Files\ffmpeg\bin`, sonst im PATH) als kleines JPEG im Temp-Ordner. Ohne ffmpeg, oder bis die Vorschau fertig ist, steht das Symbol da.
+- **Blender-, Houdini-, Python-, Log- und Textdateien sowie Ordner** erscheinen als flaches Symbol in der Farbe ihres Pfads: Blender-Logo (`.blend`), Spirale (`.hip`, `.hda`, `.otl`), `>` (`.py`), Baumscheibe (`.log`), zwei Striche (`.md`, `.txt`), Ordner. Im Text bleibt der farbige Punkt.
+- Seit Claude Code 2.1.325 bekommt jedes Mod eine eigene Zeile in der Leiste; `handoff-button` legt die Zeilen wieder nebeneinander.
 - **Linksklick** öffnet den Pfad, **Rechtsklick** kopiert den vollen Pfad in die Zwischenablage (kurz erscheint „Pfad kopiert“).
 - **Überfahren** zeigt den Dateinamen gedämpft links in der Leiste.
 
