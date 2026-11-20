@@ -280,6 +280,10 @@ const FRAMES = ['#e0303a', '#f5821f', '#3cb44b', '#3a78d8', '#f2c40f', '#8e44ad'
 
 // Flat symbols for the band in the path's colour, on a 24 x 24 grid; holes are cut, so any background shows through.
 const ICON_DRAWN = 22
+// A disc in the colour with a sign cut out of it, so the background shows through the sign.
+const disc = (colour: string, cut: string) =>
+  `<mask id="cut"><rect width="24" height="24" fill="#fff"/><g fill="#000" stroke="#000">${cut}</g></mask>` +
+  `<circle cx="12" cy="12.5" r="9.2" fill="${colour}" mask="url(#cut)"/>`
 const ICONS: { test: (path: string) => boolean; draw: (colour: string) => string }[] = [
   {
     // A Blender file: the tilted ring with its eye and three arms, after the Blender logo.
@@ -340,6 +344,13 @@ const ICONS: { test: (path: string) => boolean; draw: (colour: string) => string
     draw: c =>
       `<g fill="${c}"><path d="M6.5 2.5H12.8V7.6a1.6 1.6 0 0 0 1.6 1.6H19.5V20a2 2 0 0 1-2 2H6.5a2 2 0 0 1-2-2V4.5a2 2 0 0 1 2-2z"/>` +
       `<path stroke="${c}" stroke-width="0.8" stroke-linejoin="round" d="M14.3 2.9 L19.1 7.7 H14.3 Z"/></g>`,
+  },
+  {
+    // Model weights (safetensors, checkpoints, GGUF): three linked nodes of a network cut out of a disc.
+    test: path => /\.(safetensors|ckpt|pt|pth|gguf|onnx)$/i.test(path),
+    draw: c =>
+      disc(c, `<path fill="none" stroke-width="1.3" d="M12 8.2L8.2 15L15.8 15Z"/>` +
+        `<g stroke="none"><circle cx="12" cy="8.2" r="1.9"/><circle cx="8.2" cy="15" r="1.9"/><circle cx="15.8" cy="15" r="1.9"/></g>`),
   },
   {
     // Markdown and text: just two lines of text, a long one over a short one.
