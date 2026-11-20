@@ -1,0 +1,8 @@
+{
+  "name": "bright-buttons",
+  "version": "0.9.0",
+  "description": "Coloured buttons and previews above the prompt for the paths in Claude's replies: left click opens (folders, media and text in the app of your choice), right click copies the path, hover shows the file name. Windows, macOS, Linux. /bright-buttons opens the settings.",
+  "author": {
+    "name": "gottesgerl"
+  }
+}

@@ -271,8 +271,8 @@ if ($null -ne $target) { [OpusWin]::Front($target); "front" } else { "no lister"
 const MEDIA = /\.(png|jpe?g|webp|bmp|gif|tiff?|exr|hdr|tga|dpx|mp4|mov|mkv|avi|webm|m4v|mxf)$/i
 
 // Text files (TEXT, above) show in a pane of this chat instead of an outside app.
-const VIEWER = 'path-viewer'
-const SETTINGS = 'path-buttons-settings'
+const VIEWER = 'bright-buttons-viewer'
+const SETTINGS = 'bright-buttons-settings'
 const VIEW_MAX_CHARS = 200000
 let viewing: { path: string; text: string; isMarkdown: boolean } | undefined
 
@@ -348,7 +348,7 @@ async function open($: Engine, path: string) {
     }
     if (command[0] === OPUS) {
       // Go switches the tab but leaves the window where it was: bring it forward.
-      const script = tempFile('path-buttons-focus-opus.ps1')
+      const script = tempFile('bright-buttons-focus-opus.ps1')
       await $.fs.write(script, FOCUS_OPUS)
       await $.process.run(
         ['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script, '-Folder', path],
@@ -514,7 +514,7 @@ async function makeThumb($: Engine, path: string) {
       hash = (hash * 31 + char.charCodeAt(0)) | 0
     }
     // A small JPEG: the band's whole drawing has a size limit, and seven PNG previews outgrow it.
-    const out = tempFile('path-buttons-thumb-' + (hash >>> 0).toString(16) + '.jpg')
+    const out = tempFile('bright-buttons-thumb-' + (hash >>> 0).toString(16) + '.jpg')
     const started = Date.now() - 2000
     const frame = ['-frames:v', '1', '-vf', 'scale=-2:' + THUMB_HEIGHT + ',hue=s=0,lutyuv=y=115+val*0.45', '-q:v', '6', out]
     // A video shows its frame at one second (a poster); a clip shorter than that its first frame.
@@ -590,18 +590,18 @@ let hovered: string | undefined
 let copiedNote: string | undefined
 
 export const register: Register = on => {
-  // /path-buttons opens the settings pane.
+  // /bright-buttons opens the settings pane.
   on('session.start', async ($, e, next) => {
-    await $.command.register({ name: 'path-buttons', description: 'Settings of the path buttons: programs, previews, symbols' })
+    await $.command.register({ name: 'bright-buttons', description: 'Settings of the bright buttons: programs, previews, symbols' })
     return next(e)
   })
 
-  on('command.run', { command: 'path-buttons' }, async $ => {
+  on('command.run', { command: 'bright-buttons' }, async $ => {
     await resolvePlatform($)
     await loadSettings($)
     await resolvePrograms($)
-    await $.ui.open({ id: SETTINGS, title: 'Path buttons' })
-    return { text: 'Path buttons settings opened.' }
+    await $.ui.open({ id: SETTINGS, title: 'Bright buttons' })
+    return { text: 'Bright buttons settings opened.' }
   })
 
   on('ui.render', { component: 'Pane', requestId: SETTINGS }, async ($, e) => {

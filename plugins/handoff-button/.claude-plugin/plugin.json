@@ -1,7 +1,7 @@
 {
   "name": "handoff-button",
-  "version": "0.5.2",
-  "description": "⌾-Button: sofort /advisor opus. C-Button: sofort /compact. H-Button: bittet um ein Handover. ⤓-Button: Chat komprimieren, in [A] umbenennen, neuen Chat [B] mit der Übergabe starten, den alten archivieren. Beim Überfahren erscheint ein kurzer Hinweis. Zeigt Buttons anderer Mods (path-buttons) links neben dem H.",
+  "version": "0.5.3",
+  "description": "⌾-Button: sofort /advisor opus. C-Button: sofort /compact. H-Button: bittet um ein Handover. ⤓-Button: Chat komprimieren, in [A] umbenennen, neuen Chat [B] mit der Übergabe starten, den alten archivieren. Beim Überfahren erscheint ein kurzer Hinweis. Zeigt Buttons anderer Mods (bright-buttons) links neben dem H.",
   "author": {
     "name": "gottesgerl"
   }

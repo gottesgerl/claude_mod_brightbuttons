@@ -4,19 +4,19 @@ Two mods for Claude Code (desktop app and terminal) that together form a band ab
 
 | Mod | What it does |
 | --- | --- |
-| `path-buttons` | A coloured button per path from the latest replies, a small preview for images and videos. Left click opens, right click copies the path. Windows, macOS and Linux. |
-| `handoff-button` | `⌾` runs `/advisor opus`, `C` runs `/compact`, `H` asks for a handover, `⤓` exports the chat, renames it `[A]`, starts a new chat `[B]` with the handover and archives the old one. Lays the `path-buttons` row beside its own. Windows. |
+| `bright-buttons` | A coloured button per path from the latest replies, a small preview for images and videos. Left click opens, right click copies the path. Windows, macOS and Linux. |
+| `handoff-button` | `⌾` runs `/advisor opus`, `C` runs `/compact`, `H` asks for a handover, `⤓` exports the chat, renames it `[A]`, starts a new chat `[B]` with the handover and archives the old one. Lays the `bright-buttons` row beside its own. Windows. |
 
-Each mod works on its own. With both, the path buttons stand left of the H.
+Each mod works on its own. With both, the coloured buttons stand left of the H.
 
 ## Installation
 
 In a terminal (Claude Code must be installed):
 
 ```
-claude plugin marketplace add gottesgerl/claude_mod_pathbuttons
-claude plugin install path-buttons@path-buttons
-claude plugin install handoff-button@path-buttons
+claude plugin marketplace add gottesgerl/claude_mod_brightbuttons
+claude plugin install bright-buttons@bright-buttons
+claude plugin install handoff-button@bright-buttons
 ```
 
 Then restart Claude. The mods run in every new session, the desktop app included.
@@ -24,8 +24,8 @@ Then restart Claude. The mods run in every new session, the desktop app included
 Updating to a new version:
 
 ```
-claude plugin marketplace update path-buttons
-claude plugin update path-buttons
+claude plugin marketplace update bright-buttons
+claude plugin update bright-buttons
 claude plugin update handoff-button
 ```
 
@@ -36,16 +36,16 @@ If you also load a mod as a folder under `~/.claude/mods/` (`CLAUDE_CODE_PLUGIN_
 Buttons appear for absolute paths, and for relative paths that start with a folder of the project. To get them reliably, add this to `~/.claude/CLAUDE.md` (it applies to all projects; create the file if there is none):
 
 ```markdown
-## Paths in replies as path-buttons
+## Paths in replies as bright buttons
 
-The `path-buttons` mod turns paths in replies into coloured buttons.
+The `bright-buttons` mod turns paths in replies into coloured buttons.
 
 - Write every file and folder as an absolute path in backticks, e.g. `C:\Projects\example\file.png` or `/Users/me/Projects/example/file.png`.
 - No markdown links to local files.
 - At most 7 paths per reply (the mod has 7 colours), the most important first.
 ```
 
-## path-buttons
+## bright-buttons
 
 Every path gets a coloured mark. The same mark stands before the path in the reply and on its button, so it is clear which button belongs to which path. The shape tells the kind:
 
@@ -75,7 +75,7 @@ In the band:
 
 ### Settings
 
-`/path-buttons` opens the settings pane:
+`/bright-buttons` opens the settings pane:
 - **Programs** for folders and for images and videos: the full path of a program (on macOS an `.app` works too). Empty means automatic, as in the table above.
 - **Previews** of images and videos on or off.
 - **Symbols** for file types on or off (off: dots only).
@@ -88,11 +88,11 @@ Relative paths like `blender/shot01/frame.png` are found without any setup when 
 
 Notes:
 - Paths are found as `C:\...` or `C:/...` (Windows), `/Users/...`, `/home/...`, `/Volumes/...`, `/mnt/...` and other usual top folders, and `~/...`. In backticks any absolute path counts. Paths with spaces are found only in backticks.
-- To bring Directory Opus forward, a small PowerShell script is written to the temp folder (`path-buttons-focus-opus.ps1`).
+- To bring Directory Opus forward, a small PowerShell script is written to the temp folder (`bright-buttons-focus-opus.ps1`).
 
 ## handoff-button
 
-Four buttons on the right of the band above the prompt. Hovering shows a short hint on the left of the band, where `path-buttons` shows a file name.
+Four buttons on the right of the band above the prompt. Hovering shows a short hint on the left of the band, where `bright-buttons` shows a file name.
 
 | Button | What it does |
 | --- | --- |

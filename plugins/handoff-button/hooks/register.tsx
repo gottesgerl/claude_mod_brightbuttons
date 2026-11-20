@@ -337,9 +337,9 @@ const HINTS: Record<ButtonId, string> = {
 }
 let hint: ButtonId | undefined
 // Whether the band's rows are laid side by side: then the hint stands at the band's left end,
-// where path-buttons shows a hovered file name, not beside these buttons.
+// where bright-buttons shows a hovered file name, not beside these buttons.
 let isCombined = false
-// The room kept for the hint (columns), as path-buttons keeps for its file name.
+// The room kept for the hint (columns), as bright-buttons keeps for its file name.
 const HINT_ROOM = 18
 let lastIsWorking = false
 let lastBack: Back | undefined
@@ -361,7 +361,7 @@ async function pressButton($: Engine, id: ButtonId) {
 }
 
 // The dim hint, one line: cut with an ellipsis when the band is short of room.
-// Beside path-buttons' row it takes all the free room, so it starts at the band's left end.
+// Beside bright-buttons' row it takes all the free room, so it starts at the band's left end.
 function hintOf(Box: any, Text: any, fill = false) {
   return (
     <Box key="hint" marginRight="md" flexGrow={fill ? 1 : 0} flexShrink={1} minWidth={HINT_ROOM}>
@@ -473,9 +473,9 @@ export const register: Register = on => {
   })
 
   // Since the app draws one band row per mod, the rows are laid side by side again:
-  // path-buttons first, these buttons last, all on one line at the right.
+  // bright-buttons first, these buttons last, all on one line at the right.
   on('ui.render', { component: 'AbovePromptList' }, async ($, e, next) => {
-    const rank = (plugin: string) => (plugin.includes('path-buttons') ? 0 : plugin.includes('handoff-button') ? 2 : 1)
+    const rank = (plugin: string) => (plugin.includes('bright-buttons') || plugin.includes('path-buttons') ? 0 : plugin.includes('handoff-button') ? 2 : 1)
     const rows = [...e.props.rows].sort((a, b) => rank(a.plugin) - rank(b.plugin))
     // Each row drawn on its own by the engine, then the drawn rows side by side in one Box.
     if (e.props.hasSurvey || rows.length < 2) {
@@ -488,7 +488,7 @@ export const register: Register = on => {
       drawn.push(await next({ ...e, props: { ...e.props, rows: [row] } }))
     }
     const { Box, Text } = $.ui.resolve(e) as any
-    // The hint stands at the band's left end, where path-buttons shows a hovered file name.
+    // The hint stands at the band's left end, where bright-buttons shows a hovered file name.
     // Nothing wraps the rows: a wrapper counts toward the band's limits, past them it is blank.
     return (
       <Box flexDirection="row" justifyContent="flex-end" alignItems="center" gap="sm">
@@ -503,7 +503,7 @@ export const register: Register = on => {
       return next(e)
     }
 
-    // Other mods (path-buttons) may add their own row content; it sits left of H.
+    // Other mods (bright-buttons) may add their own row content; it sits left of H.
     const others = await next(e)
     const { Box, Button } = $.ui.resolve(e)
     const id = await $.session.id()
