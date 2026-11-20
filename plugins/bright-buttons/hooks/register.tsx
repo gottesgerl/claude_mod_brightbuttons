@@ -332,37 +332,42 @@ async function exportedChats($: Engine) {
 }
 
 // The band's buttons, their dim hover hints, and what a press runs.
-// A right click: on ⌾ picks the advisor's model, on C turns compact-when-idle on or off,
-// on H switches between asking for a handover and the full handover.
-type ButtonId = 'back' | 'advisor' | 'compact' | 'handover' | 'yes'
-const BUTTONS: readonly string[] = ['back', 'advisor', 'compact', 'handover', 'yes']
+// ⌾ runs /advisor (a right click picks its model). The cache button shows the prompt cache's time
+// left (a click renews it now, a right click turns auto-renew on or off). The context button shows the
+// context still free and runs its mode: compact, handover, or handover with log and clear (a right
+// click shows the modes and the compact-when-idle switch). The ids 'compact' and 'handover' stay
+// those of the cache and the context button, as the stored settings name them.
+type ButtonId = 'back' | 'advisor' | 'compact' | 'handover' | 'yes' | 'idle'
+const BUTTONS: readonly string[] = ['back', 'advisor', 'compact', 'handover', 'yes', 'idle']
 const MODELS = ['fable', 'opus', 'sonnet', 'haiku'] as const
 type Model = (typeof MODELS)[number]
 const MODEL_NAMES: Record<Model, string> = { fable: 'Fable', opus: 'Opus', sonnet: 'Sonnet', haiku: 'Haiku' }
 let advisorModel: Model = 'opus'
 let isPicking = false
-let isFullHandover = false
 let isLoaded = false
-// The chat the advisor model and compact-when-idle were read for: both are set per chat.
+// The chat the advisor model, compact-when-idle and auto-renew were read for: all are set per chat.
 let chatLoaded = ''
 
-// Compact when idle: once a reply is done and nothing new comes for idleMinutes, the chat is
-// compacted if its context is at least idlePercent full. The API's cache has run out by then,
-// so the next message would read the whole chat anew anyway; compacted, it starts small.
-// Both figures are settings (the settings pane), for every chat alike.
-// What C does on its own, per chat (a right click on C picks it): nothing (manual), compact when idle,
-// or auto-renew: a minute before the cache runs out, a short message keeps it alive (renewMax times
-// in a row at most; a message of the person's counts again from 0).
-const C_MODES = ['manual', 'idle', 'renew'] as const
-type CMode = (typeof C_MODES)[number]
-const C_MODE_NAMES: Record<CMode, string> = { manual: 'Manual', idle: 'Compact when idle', renew: 'Auto-renew' }
-let cMode: CMode = 'manual'
-let isPickingMode = false
+// What the context button runs, from chat to chat.
+const CONTEXT_MODES = ['compact', 'handover', 'full'] as const
+type ContextMode = (typeof CONTEXT_MODES)[number]
+const CONTEXT_MODE_NAMES: Record<ContextMode, string> = { compact: 'Compact', handover: 'Handover', full: 'Handover, Log & Clear' }
+let contextMode: ContextMode = 'handover'
+let isContextMenu = false
+
+// Compact when idle (per chat): once a reply is done and nothing new comes for idleMinutes, the chat
+// is compacted if its context is at least idlePercent full. A red dot on the context button.
+// Auto-renew (per chat): renewLead minutes before the cache's time is up, a short message keeps the
+// cache alive, renewMax times in a row at most (a message of the person's counts again from 0).
+// A red dot on the cache button.
+let isIdleCompact = false
+let isAutoRenew = false
+let isTurnRunning = false
+let idleTimer: { cancel: () => void } | undefined
+let renewTimer: { cancel: () => void } | undefined
 let renewCount = 0
 let isRenewSent = false
 const RENEW_TEXT = 'Cache keep-alive, nothing to do. Reply with just: ok'
-let isTurnRunning = false
-let idleTimer: { cancel: () => void } | undefined
 
 // The thumb's answer, typed into the chat as if the person had, in the language of the settings.
 const LANGUAGES = ['en', 'es', 'zh', 'fr', 'uk', 'ja', 'ko', 'de'] as const
@@ -386,10 +391,10 @@ const FLAGS: Record<Language, string> = {
   zh: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 16"><rect width="24" height="16" fill="#EE1C25"/><path fill="#FFFF00" d="M4.00 1.60 L4.54 3.26 L6.28 3.26 L4.87 4.28 L5.41 5.94 L4.00 4.92 L2.59 5.94 L3.13 4.28 L1.72 3.26 L3.46 3.26ZM8.27 0.85 L8.25 1.43 L8.80 1.63 L8.24 1.79 L8.22 2.37 L7.90 1.89 L7.34 2.05 L7.69 1.59 L7.37 1.11 L7.92 1.31ZM10.17 2.63 L9.90 3.15 L10.31 3.56 L9.74 3.47 L9.47 3.99 L9.38 3.42 L8.81 3.33 L9.33 3.06 L9.24 2.49 L9.65 2.90ZM10.35 5.33 L9.89 5.68 L10.09 6.23 L9.61 5.91 L9.15 6.26 L9.31 5.70 L8.83 5.38 L9.41 5.36 L9.57 4.80 L9.77 5.35ZM8.27 6.45 L8.25 7.03 L8.80 7.23 L8.24 7.39 L8.22 7.97 L7.90 7.49 L7.34 7.65 L7.69 7.19 L7.37 6.71 L7.92 6.91Z"/></svg>',
   de: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 16"><rect width="24" height="16" fill="#FFCE00"/><rect width="24" height="10.67" fill="#DD0000"/><rect width="24" height="5.33" fill="#000"/></svg>',
 }
-const yesText = () => YES[cfg.language]
+const yesText = () => cfg.thumbText.trim() || YES[cfg.language]
 
-// What the settings (register.tsx) decide: which buttons show, the idle and cache figures, the
-// language, the advisor model a new chat starts with, the room for the hint.
+// What the settings decide: which buttons show, the idle and cache figures, the language, the
+// thumb's own text (in that language), the advisor model a new chat starts with, the room for the hint.
 type HandoffConfig = {
   thumb: boolean
   advisor: boolean
@@ -398,26 +403,28 @@ type HandoffConfig = {
   idleMinutes: number
   idlePercent: number
   cacheMinutes: number
+  renewLead: number
   renewMax: number
   language: Language
   advisorModel: Model
   textRoom: number
+  thumbText: string
 }
 const cfg: HandoffConfig = {
   thumb: true,
-  advisor: true,
+  advisor: false,
   compact: true,
   handover: true,
-  idleMinutes: 60,
+  idleMinutes: 55,
   idlePercent: 50,
   cacheMinutes: 60,
-  renewMax: 5,
+  renewLead: 1,
+  renewMax: 2,
   language: 'en',
   advisorModel: 'opus',
-  textRoom: 18,
+  textRoom: 10,
+  thumbText: '',
 }
-// Compact when idle on: an outlined C in red in place of the plain one.
-const C_RED = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="none" stroke="#e5484d" stroke-width="1.3" stroke-linejoin="round" d="M18.16 6.34 A8 8 0 1 0 18.16 17.66 L15.75 15.25 A4.6 4.6 0 1 1 15.75 8.75 Z"/></svg>'
 // A thumb up drawn as the bright-buttons hand is: a thin grey outline.
 const THUMB =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="none" stroke="#9a9a9a" stroke-width="1.3" ' +
@@ -433,14 +440,18 @@ function hintText(id: ButtonId) {
     return 'Advisor (' + MODEL_NAMES[advisorModel] + ')'
   }
   if (id === 'compact') {
-    const mode = cMode === 'idle' ? 'Compact (when idle)' : cMode === 'renew' ? 'Compact (auto-renew ' + renewCount + '/' + cfg.renewMax + ')' : 'Compact'
-    return mode + (minutesShown > 0 ? ' · cache ' + minutesShown + ' min' : isExpiredShown ? ' · cache expired' : '')
+    return 'Cache' + (minutesShown > 0 ? ' · ' + minutesShown + ' min' : isExpiredShown ? ' · expired' : '') +
+      (isAutoRenew ? (renewCount > 0 ? ' · auto-renewed ' + renewCount + '×' : ' · auto-renew on') : '')
+  }
+  if (id === 'idle') {
+    return 'Compact when idle: ' + cfg.idleMinutes + ' min, context ≥ ' + cfg.idlePercent + ' %'
   }
   if (id === 'yes') {
     return yesText()
   }
   const context = contextOf.get(chatLoaded)
-  return (isFullHandover ? 'Full handover' : 'Handover') + (context !== undefined && context > 0 ? ' · context ' + context + ' %' : '')
+  return CONTEXT_MODE_NAMES[contextMode] + (context !== undefined && context > 0 ? ' · context ' + context + ' %' : '') +
+    (isIdleCompact ? ' · compact when idle' : '')
 }
 let hint: ButtonId | undefined
 // Narrower than this (columns), the band leaves the thumb out first.
@@ -448,14 +459,17 @@ const THUMB_LEAST = 64
 let lastIsWorking = false
 let lastBack: Back | undefined
 // Whether the thumb shows in a band this many columns wide.
-const thumbFits = (columns: number) => cfg.thumb && !isPicking && !isPickingMode && columns >= THUMB_LEAST
+const thumbFits = (columns: number) => cfg.thumb && !isPicking && !isContextMenu && columns >= THUMB_LEAST
 
-// The handover mode lasts from chat to chat; the advisor model and compact-when-idle belong to
-// one chat each (a new chat starts with the advisor model of the settings, without compact-when-idle).
+// The context mode lasts from chat to chat; the advisor model, compact-when-idle and auto-renew belong
+// to one chat each (a new chat starts with the settings' advisor model, both of the others off).
 async function loadState($: Engine) {
   if (!isLoaded) {
     isLoaded = true
-    isFullHandover = (await $.store.get('full-handover')) === true
+    const mode = (await $.store.get('context-mode')) as ContextMode | undefined
+    contextMode = mode !== undefined && CONTEXT_MODES.includes(mode)
+      ? mode
+      : (await $.store.get('full-handover')) === true ? 'full' : 'handover'
   }
   const id = await $.session.id()
   if (chatLoaded === id) {
@@ -464,12 +478,14 @@ async function loadState($: Engine) {
   chatLoaded = id
   const model = (await $.store.get('advisor-model:' + id)) as Model | undefined
   advisorModel = model !== undefined && MODELS.includes(model) ? model : cfg.advisorModel
-  const stored = (await $.store.get('c-mode:' + id)) as CMode | undefined
-  cMode = stored !== undefined && C_MODES.includes(stored)
-    ? stored
-    : (await $.store.get('idle-compact:' + id)) === true ? 'idle' : 'manual'
+  // Before 0.14 one mode of C held either: read it where the new keys are not set yet.
+  const old = await $.store.get('c-mode:' + id)
+  const idle = await $.store.get('idle-compact:' + id)
+  const renew = await $.store.get('auto-renew:' + id)
+  isIdleCompact = idle === true || (idle === undefined && old === 'idle')
+  isAutoRenew = renew === true || (renew === undefined && old === 'renew')
   renewCount = 0
-  // Another chat: its own wait (none in manual mode).
+  // Another chat: its own waits.
   if (!isTurnRunning) {
     startIdle($)
   } else {
@@ -478,7 +494,7 @@ async function loadState($: Engine) {
 }
 
 // How long the prompt cache still holds: it lasts an hour from the end of the chat's last reply.
-// The minutes left stand dim right of C; one timer a minute draws them again while any are left.
+// One timer a minute draws the cache button again while any time is left.
 const cacheFrom = new Map<string, number>()
 let isTicking = false
 
@@ -538,65 +554,70 @@ async function cacheLeft($: Engine, id: string) {
   return left > 0 ? Math.ceil(left / 60000) : 0
 }
 
-// The cache's hour as an abstract hourglass in C's grey field: the part still left fills it from the
-// bottom a shade darker, sinking as the minutes run out.
-// The whole C button is one drawing: an empty field with a thin frame, the cache's hour filling it
-// from the bottom in the grey of the other buttons, and the C (red outline when compact when idle
-// is on). Size and greys as measured on the app's light theme (H: 30 x 28); tune here.
+// The cache and the context button are one drawing each, on a field the size of the app's buttons
+// (H: 30 x 28, light theme): a thin frame, a grey fill, a small symbol, a red dot top right while
+// their automatic (auto-renew, compact when idle) is on.
+// Cache: the time still left fills the field from the bottom, an abstract hourglass; run out, the
+// symbol turns pale with a small "zz" (the cache sleeps). The symbol: an ice lolly in hairlines.
+// Context: the context still free fills the field from the bottom (its top sinks as the chat grows);
+// its letter (the mode) takes a colour once the context is this full (percent).
 const C_FIELD_W = 30
 const C_FIELD_H = 28
 const C_FIELD_R = 6
 const C_FIELD_GREY = '#e7e7e7'
 const C_LETTER_GREY = '#5c5c5c'
-const C_RED_PATH = 'M18.16 6.34 A8 8 0 1 0 18.16 17.66 L15.75 15.25 A4.6 4.6 0 1 1 15.75 8.75 Z'
-const C_IDLE_RED = '#e5484d'
-const C_RENEW_GREEN = '#30a46c'
-// Cache expired: the C pale and a little left, a small "zz" beside it (the cache sleeps).
 const C_PALE_GREY = '#cfcfcf'
 const C_ZZ_GREY = '#b5b5b5'
-function cField(minutes: number, mode: CMode, isExpired = false) {
-  const isRed = mode !== 'manual'
-  const outline = mode === 'renew' ? C_RENEW_GREEN : C_IDLE_RED
-  const w = C_FIELD_W
-  const h = C_FIELD_H
-  const left = Math.max(0, Math.min(cfg.cacheMinutes, minutes)) / cfg.cacheMinutes
-  const top = (h * (1 - left)).toFixed(2)
-  const shift = isExpired ? -2 : 0
-  const glyph = isRed
-    ? '<g transform="translate(' + ((w - 16) / 2 + shift) + ' ' + ((h - 16) / 2) + ') scale(0.6667)"' +
-      (isExpired ? ' opacity="0.45"' : '') + '><path fill="none" stroke="' + outline + '" ' +
-      'stroke-width="1.6" stroke-linejoin="round" d="' + C_RED_PATH + '"/></g>'
-    : '<text x="' + (w / 2 + shift) + '" y="' + (h / 2) + '" text-anchor="middle" dominant-baseline="central" ' +
-      'font-family="Segoe UI, system-ui, -apple-system, sans-serif" font-size="14" fill="' +
-      (isExpired ? C_PALE_GREY : C_LETTER_GREY) + '">C</text>'
-  const zz = isExpired
-    ? '<text x="' + (w - 8.5) + '" y="9.5" font-family="Segoe UI, system-ui, sans-serif" font-style="italic" font-size="5.5" fill="' + C_ZZ_GREY + '">z</text>' +
-      '<text x="' + (w - 6) + '" y="6.2" font-family="Segoe UI, system-ui, sans-serif" font-style="italic" font-size="4" fill="' + C_PALE_GREY + '">z</text>'
-    : ''
-  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + w + ' ' + h + '">' +
-    '<defs><clipPath id="field"><rect width="' + w + '" height="' + h + '" rx="' + C_FIELD_R + '"/></clipPath></defs>' +
-    (left > 0 ? '<rect y="' + top + '" width="' + w + '" height="' + h + '" fill="' + C_FIELD_GREY + '" clip-path="url(#field)"/>' : '') +
-    '<rect x="0.5" y="0.5" width="' + (w - 1) + '" height="' + (h - 1) + '" rx="' + (C_FIELD_R - 0.5) + '" fill="none" stroke="' +
-    C_FIELD_GREY + '" stroke-width="1"/>' +
-    glyph + zz + '</svg>'
-}
-// The H button drawn as C is: the context still free fills its field from the bottom (its top sinks
-// as the chat grows), and the letter takes a colour once the context is this full (percent).
+const C_DOT_RED = '#e5484d'
 const H_STEPS: readonly (readonly [number, string])[] = [[75, '#e5484d'], [50, '#f08c00'], [33, '#3e7bd6'], [20, '#30a46c']]
-function hField(label: string, contextPercent: number) {
+
+function fieldOf(id: string, filled: number, symbol: string, isDot: boolean) {
   const w = C_FIELD_W
   const h = C_FIELD_H
-  const used = Math.max(0, Math.min(100, contextPercent)) / 100
-  const top = (h * used).toFixed(2)
-  const colour = H_STEPS.find(([least]) => contextPercent >= least)?.[1] ?? C_LETTER_GREY
+  const share = Math.max(0, Math.min(1, filled))
+  const top = (h * (1 - share)).toFixed(2)
   return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + w + ' ' + h + '">' +
-    '<defs><clipPath id="hfield"><rect width="' + w + '" height="' + h + '" rx="' + C_FIELD_R + '"/></clipPath></defs>' +
-    (used < 1 ? '<rect y="' + top + '" width="' + w + '" height="' + h + '" fill="' + C_FIELD_GREY + '" clip-path="url(#hfield)"/>' : '') +
+    '<defs><clipPath id="' + id + '"><rect width="' + w + '" height="' + h + '" rx="' + C_FIELD_R + '"/></clipPath></defs>' +
+    (share > 0 ? '<rect y="' + top + '" width="' + w + '" height="' + h + '" fill="' + C_FIELD_GREY + '" clip-path="url(#' + id + ')"/>' : '') +
     '<rect x="0.5" y="0.5" width="' + (w - 1) + '" height="' + (h - 1) + '" rx="' + (C_FIELD_R - 0.5) + '" fill="none" stroke="' +
-    C_FIELD_GREY + '" stroke-width="1"/>' +
-    '<text x="' + (w / 2) + '" y="' + (h / 2) + '" text-anchor="middle" dominant-baseline="central" ' +
-    'font-family="Segoe UI, system-ui, -apple-system, sans-serif" font-size="14" fill="' + colour + '">' + label + '</text></svg>'
+    C_FIELD_GREY + '" stroke-width="1"/>' + symbol +
+    (isDot ? '<circle cx="' + (w - 4.6) + '" cy="4.6" r="2.7" fill="' + C_DOT_RED + '" stroke="#fff" stroke-width="0.8"/>' : '') +
+    '</svg>'
 }
+
+function cacheField(minutes: number, isRenew: boolean, isExpired: boolean) {
+  const x = isExpired ? 13 : 15
+  const colour = isExpired ? C_PALE_GREY : C_LETTER_GREY
+  // An ice lolly in hairlines: rounded top, the glaze running down with a long drip, the stick, a
+  // glint top right (drawn on 24 x 24, scaled in; centred on x).
+  const symbol = '<g transform="translate(' + (x - 12.75) + ' 0.6) scale(1.0625)" fill="none" stroke="' + colour + '" stroke-width="0.72" ' +
+    'stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M6.6 16.2V8A5.4 5.4 0 0 1 17.4 8V16.2A1 1 0 0 1 16.4 17.2H7.6A1 1 0 0 1 6.6 16.2Z"/>' +
+    '<path d="M6.6 10.4C7.2 11.3 8.3 11.2 8.8 10.5C9.4 9.6 10.3 9.6 10.8 10.3' +
+    'C11.5 10.9 12 10.5 12.2 11V14.6A0.9 0.9 0 0 0 14 14.6V10.8C14.2 9.9 15 9.8 15.5 10.4C16 11 16.9 10.8 17.4 9.8"/>' +
+    '<path d="M10.8 17.2V21.4A1.2 1.2 0 0 0 13.2 21.4V17.2"/>' +
+    '<path d="M14.6 3.6A4.6 4.6 0 0 1 16.8 6.2M16.9 7V7.6"/></g>' +
+    (isExpired
+      ? '<text x="' + (C_FIELD_W - 8.5) + '" y="9.5" font-family="Segoe UI, system-ui, sans-serif" font-style="italic" font-size="5.5" fill="' + C_ZZ_GREY + '">z</text>' +
+        '<text x="' + (C_FIELD_W - 6) + '" y="6.2" font-family="Segoe UI, system-ui, sans-serif" font-style="italic" font-size="4" fill="' + C_PALE_GREY + '">z</text>'
+      : '')
+  const left = Math.max(0, Math.min(cfg.cacheMinutes, minutes)) / cfg.cacheMinutes
+  // With the "zz" top right the dot would sit on it: it moves to the bottom right then.
+  const svg = fieldOf('cachefield', left, symbol, isRenew && !isExpired)
+  return isRenew && isExpired
+    ? svg.replace('</svg>', '<circle cx="' + (C_FIELD_W - 4.6) + '" cy="' + (C_FIELD_H - 4.6) + '" r="2.7" fill="' + C_DOT_RED + '" stroke="#fff" stroke-width="0.8"/></svg>')
+    : svg
+}
+
+// The context button's letter names its mode: C (compact), H (handover), ⤓ (handover, log & clear).
+const CONTEXT_LETTERS: Record<ContextMode, string> = { compact: 'C', handover: 'H', full: '⤓' }
+function contextField(contextPercent: number, isIdle: boolean, mode: ContextMode) {
+  const colour = H_STEPS.find(([least]) => contextPercent >= least)?.[1] ?? C_LETTER_GREY
+  const symbol = '<text x="' + (C_FIELD_W / 2) + '" y="' + (C_FIELD_H / 2) + '" text-anchor="middle" dominant-baseline="central" ' +
+    'font-family="Segoe UI, system-ui, -apple-system, sans-serif" font-size="14" fill="' + colour + '">' + CONTEXT_LETTERS[mode] + '</text>'
+  return fieldOf('contextfield', 1 - contextPercent / 100, symbol, isIdle)
+}
+
 let minutesShown = 0
 let isExpiredShown = false
 // How full the context is (percent) per chat, read after each reply and the first time a chat shows.
@@ -610,27 +631,29 @@ async function readContext($: Engine, id: string) {
       $.ui.invalidate('ui.render')
     }
   } catch {
-    // no figures: no line
+    // no figures: a full field
   }
 }
 
+// Both waits stop when a turn starts and start again when one ends (or another chat shows).
 function stopIdle() {
   idleTimer?.cancel()
   idleTimer = undefined
+  renewTimer?.cancel()
+  renewTimer = undefined
 }
 
 function startIdle($: Engine) {
   stopIdle()
-  if (cMode === 'renew') {
+  if (isAutoRenew) {
     void startRenew($)
-    return
   }
-  if (cMode !== 'idle') {
+  if (!isIdleCompact) {
     return
   }
   idleTimer = $.clock.after(cfg.idleMinutes * 60 * 1000, async () => {
     idleTimer = undefined
-    if (cMode !== 'idle' || isTurnRunning || isRunning) {
+    if (!isIdleCompact || isTurnRunning || isRunning) {
       return
     }
     try {
@@ -646,28 +669,28 @@ function startIdle($: Engine) {
   }) as { cancel: () => void }
 }
 
-// Auto-renew: a minute before the cache's time (from the end of the last reply) is up, a short
-// message as the plugin's own keeps the cache alive. Only in the chat it was set for.
+// Auto-renew: renewLead minutes before the cache's time (from the end of the last reply) is up, a
+// short message as the plugin's own keeps the cache alive. Only in the chat it was set for.
 async function startRenew($: Engine) {
   const id = await $.session.id()
   await cacheLeft($, id)
   const from = cacheFrom.get(id) ?? 0
-  if (from <= 0 || cMode !== 'renew' || isTurnRunning) {
+  if (from <= 0 || !isAutoRenew || isTurnRunning) {
     return
   }
   if (renewCount >= cfg.renewMax) {
     await log($, 'auto-renew: ' + renewCount + ' in a row, stopped')
     return
   }
-  const wait = from + Math.max(1, cfg.cacheMinutes - 1) * 60000 - (await $.clock.now())
+  const wait = from + Math.max(1, cfg.cacheMinutes - cfg.renewLead) * 60000 - (await $.clock.now())
   if (wait <= 0) {
     // The cache is gone already (or about to be): renewing would write it anew.
     return
   }
-  stopIdle()
-  idleTimer = $.clock.after(wait, async () => {
-    idleTimer = undefined
-    if (cMode !== 'renew' || isTurnRunning || isRunning || (await $.session.id()) !== id) {
+  renewTimer?.cancel()
+  renewTimer = $.clock.after(wait, async () => {
+    renewTimer = undefined
+    if (!isAutoRenew || isTurnRunning || isRunning || (await $.session.id()) !== id) {
       return
     }
     renewCount++
@@ -682,17 +705,43 @@ async function startRenew($: Engine) {
   }) as { cancel: () => void }
 }
 
-async function pickMode($: Engine, mode: CMode) {
-  isPickingMode = false
-  cMode = mode
+// The cache button's click: the keep-alive at once (it counts as the person's, so the run starts over).
+async function renewNow($: Engine) {
+  if (isTurnRunning || isRunning) {
+    return
+  }
+  try {
+    await $.prompt.submit({ text: RENEW_TEXT })
+  } catch (error) {
+    $.ui.toast('Renew ging nicht: ' + String(error).slice(0, 200))
+  }
+}
+
+async function toggleAutoRenew($: Engine) {
+  isAutoRenew = !isAutoRenew
   renewCount = 0
-  await $.store.set('c-mode:' + (await $.session.id()), mode)
-  await log($, 'C mode: ' + mode)
+  await $.store.set('auto-renew:' + (await $.session.id()), isAutoRenew)
+  await log($, 'auto-renew: ' + isAutoRenew)
   if (!isTurnRunning) {
     startIdle($)
-  } else {
-    stopIdle()
   }
+  $.ui.invalidate('ui.render')
+}
+
+async function toggleIdleCompact($: Engine) {
+  isIdleCompact = !isIdleCompact
+  await $.store.set('idle-compact:' + (await $.session.id()), isIdleCompact)
+  await log($, 'compact when idle: ' + isIdleCompact)
+  if (!isTurnRunning) {
+    startIdle($)
+  }
+  $.ui.invalidate('ui.render')
+}
+
+async function pickContextMode($: Engine, mode: ContextMode) {
+  isContextMenu = false
+  contextMode = mode
+  await $.store.set('context-mode', mode)
   $.ui.invalidate('ui.render')
 }
 
@@ -704,9 +753,9 @@ async function sayYes($: Engine) {
   }
 }
 
-// The idle minutes changed in the settings: a running wait starts over with them.
+// The idle or cache figures changed in the settings: running waits start over with them.
 function idleChanged($: Engine) {
-  if (idleTimer !== undefined) {
+  if (idleTimer !== undefined || renewTimer !== undefined) {
     startIdle($)
   }
 }
@@ -714,8 +763,6 @@ function idleChanged($: Engine) {
 // One of the band's buttons. Each keeps its look (a drawing where it has one); an invisible region
 // of hover.tsx over it shows a dim hint while the pointer is on it and runs the action on a click.
 // Without regions, plain buttons.
-// A drawing on a button (the red C) keeps the button's grey field: the button stands under it with a
-// blank label of a letter's width, the drawing centred on top.
 function buttonOf($: Engine, ui: any, id: ButtonId, label: string, drawing?: string, isOnField = false, size = THUMB_SIZE, height = size) {
   const { Box, Button, Svg, Client } = ui
   const isDrawn = drawing !== undefined && Svg !== undefined && Client !== undefined
@@ -727,7 +774,7 @@ function buttonOf($: Engine, ui: any, id: ButtonId, label: string, drawing?: str
       {isDrawn && !isOnField ? (
         <Svg key={'look-' + id} source={drawing} alt={label} width={size} height={height} />
       ) : (
-        <Button key={id} label={isDrawn ? ' ' : label} dimColor onPress={press} />
+        <Button key={id} label={isDrawn ? ' ' : label} dimColor onPress={press} />
       )}
       {isDrawn && isOnField && (
         <Box key={'field-' + id} position="absolute" top={0} left={0} right={0} bottom={0} alignItems="center" justifyContent="center">
@@ -754,13 +801,12 @@ async function pickModel($: Engine, model: Model) {
 async function rightClick($: Engine, id: ButtonId) {
   if (id === 'advisor') {
     isPicking = !isPicking
-    isPickingMode = false
+    isContextMenu = false
   } else if (id === 'compact') {
-    isPickingMode = !isPickingMode
-    isPicking = false
+    await toggleAutoRenew($)
   } else if (id === 'handover') {
-    isFullHandover = !isFullHandover
-    await $.store.set('full-handover', isFullHandover)
+    isContextMenu = !isContextMenu
+    isPicking = false
   } else if (id === 'yes') {
     // A right click on the thumb opens the settings.
     void openSettings($)
@@ -776,10 +822,14 @@ async function pressButton($: Engine, id: ButtonId) {
   } else if (id === 'advisor') {
     await advisor($)
   } else if (id === 'compact') {
-    await compact($)
+    await renewNow($)
+  } else if (id === 'idle') {
+    await toggleIdleCompact($)
   } else if (id === 'yes') {
     await sayYes($)
-  } else if (isFullHandover) {
+  } else if (contextMode === 'compact') {
+    await compact($)
+  } else if (contextMode === 'full') {
     await handoff($, lastIsWorking)
   } else {
     await askHandover($)
@@ -818,8 +868,8 @@ function handoffMessage($: Engine, data: { action?: string; id?: string } | unde
   return true
 }
 
-// The band: the thumb and the hint at the left end, then middle (the path buttons), then ⌾, C and H,
-// each as the settings show it.
+// The band: the thumb and the hint at the left end, then middle (the path buttons), then ⌾, the cache
+// and the context button, each as the settings show it.
 async function handoffBand($: Engine, e: any, ui: any, middle: any) {
   const { Box, Button, Text } = ui
   const id = await $.session.id()
@@ -832,16 +882,16 @@ async function handoffBand($: Engine, e: any, ui: any, middle: any) {
   if (!cfg.advisor) {
     isPicking = false
   }
-  if (!cfg.compact) {
-    isPickingMode = false
+  if (!cfg.handover) {
+    isContextMenu = false
   }
-  const isMenu = isPicking || isPickingMode
+  const isMenu = isPicking || isContextMenu
   const minutesLeft = e.props.isWorking || !cfg.compact ? 0 : await cacheLeft($, id)
   minutesShown = minutesLeft
   // Expired: a reply was cached once, its time is up, and nothing runs now.
   const isExpired = cfg.compact && !e.props.isWorking && minutesLeft === 0 && (cacheFrom.get(id) ?? 0) > 0
   isExpiredShown = isExpired
-  if ((cfg.compact || cfg.handover) && !contextOf.has(id)) {
+  if (cfg.handover && !contextOf.has(id)) {
     contextOf.set(id, 0)
     $.clock.after(0, () => void readContext($, id))
   }
@@ -856,7 +906,7 @@ async function handoffBand($: Engine, e: any, ui: any, middle: any) {
   return (
     <Box justifyContent="flex-end" alignItems="center" gap="sm">
       {isThumbHere && button('yes', '👍', THUMB)}
-      {(isThumbHere || hint !== undefined) && hintOf(Box, Text, isThumbHere)}
+      {!isContextMenu && (isThumbHere || hint !== undefined) && hintOf(Box, Text, isThumbHere)}
       {!isMenu && middle}
       {!isMenu && back !== undefined && button('back', '<<')}
       {/* After a right click on ⌾ the models stand left of it, the other buttons out of the way;
@@ -866,18 +916,22 @@ async function handoffBand($: Engine, e: any, ui: any, middle: any) {
           $.clock.after(0, () => void pickModel($, model))
         }} />
       ))}
-      {cfg.advisor && !isPickingMode && button('advisor', '⌾')}
-      {/* After a right click on C its modes stand left of it, the chosen one at full strength. */}
-      {isPickingMode && C_MODES.map(mode => (
-        <Button key={'cmode-' + mode} label={C_MODE_NAMES[mode]} plain dimColor={mode !== cMode} onPress={() => {
-          $.clock.after(0, () => void pickMode($, mode))
+      {cfg.advisor && !isContextMenu && button('advisor', '⌾')}
+      {!isMenu && cfg.compact && buttonOf($, ui, 'compact', 'Cache', cacheField(minutesLeft, isAutoRenew, isExpired), false, C_FIELD_W, C_FIELD_H)}
+      {/* After a right click on the context button: its modes, the chosen one at full strength, and the
+          compact-when-idle switch. */}
+      {isContextMenu && CONTEXT_MODES.map(mode => (
+        <Button key={'cmode-' + mode} label={CONTEXT_MODE_NAMES[mode]} plain dimColor={mode !== contextMode} onPress={() => {
+          $.clock.after(0, () => void pickContextMode($, mode))
         }} />
       ))}
-      {/* Compact when idle: an outlined C in red, auto-renew in green. The cache's time fills its field from the bottom. */}
-      {!isPicking && cfg.compact && buttonOf($, ui, 'compact', 'C', cField(minutesLeft, cMode, isExpired), false, C_FIELD_W, C_FIELD_H)}
-      {/* Full handover mode: ⤓ in place of H. */}
-      {!isMenu && cfg.handover && buttonOf($, ui, 'handover', isFullHandover ? '⤓' : 'H',
-        hField(isFullHandover ? '⤓' : 'H', contextOf.get(id) ?? 0), false, C_FIELD_W, C_FIELD_H)}
+      {isContextMenu && (
+        <Box key="idle-switch" flexDirection="row" alignItems="center" gap="xs" marginLeft="md" flexShrink={0}>
+          {buttonOf($, ui, 'idle', 'Idle', switchDrawing(isIdleCompact, C_DOT_RED), false, 30, 16)}
+          <Text dimColor={!isIdleCompact} wrap="truncate-end">Idle compact</Text>
+        </Box>
+      )}
+      {!isPicking && cfg.handover && buttonOf($, ui, 'handover', CONTEXT_LETTERS[contextMode], contextField(contextOf.get(id) ?? 0, isIdleCompact, contextMode), false, C_FIELD_W, C_FIELD_H)}
     </Box>
   )
 }
@@ -1175,14 +1229,18 @@ type Settings = {
   idleMinutes: number
   idlePercent: number
   cacheMinutes: number
+  renewLead: number
   renewMax: number
   language: Language
   advisorModel: Model
+  // The thumb's own text per language; before 0.14 one text for all (thumbText).
+  thumbTexts: Partial<Record<Language, string>>
+  thumbText?: string
 }
 const DEFAULTS: Settings = {
-  folderApp: '', mediaApp: '', threeDApp: '', previews: true, symbols: true, textRoom: 18,
-  thumb: true, advisor: true, compact: true, handover: true,
-  idleMinutes: 60, idlePercent: 50, cacheMinutes: 60, renewMax: 5, language: 'en', advisorModel: 'opus',
+  folderApp: '', mediaApp: '', threeDApp: '', previews: true, symbols: true, textRoom: 10,
+  thumb: true, advisor: false, compact: true, handover: true,
+  idleMinutes: 55, idlePercent: 50, cacheMinutes: 60, renewLead: 1, renewMax: 2, language: 'en', advisorModel: 'opus', thumbTexts: {},
 }
 let settings: Settings = { ...DEFAULTS }
 let isSettingsLoaded = false
@@ -1196,10 +1254,12 @@ function applySettings() {
   cfg.idleMinutes = settings.idleMinutes
   cfg.idlePercent = settings.idlePercent
   cfg.cacheMinutes = settings.cacheMinutes
+  cfg.renewLead = settings.renewLead
   cfg.renewMax = settings.renewMax
   cfg.language = LANGUAGES.includes(settings.language) ? settings.language : 'en'
   cfg.advisorModel = MODELS.includes(settings.advisorModel) ? settings.advisorModel : 'opus'
   cfg.textRoom = settings.textRoom
+  cfg.thumbText = settings.thumbTexts?.[cfg.language] ?? ''
 }
 
 async function loadSettings($: Engine) {
@@ -1210,6 +1270,10 @@ async function loadSettings($: Engine) {
   try {
     const stored = (await $.store.get('settings')) as Partial<Settings> | undefined
     settings = { ...DEFAULTS, ...(stored ?? {}) }
+    if (typeof settings.thumbText === 'string' && settings.thumbText !== '' && Object.keys(settings.thumbTexts ?? {}).length === 0) {
+      settings.thumbTexts = { [settings.language]: settings.thumbText }
+    }
+    delete settings.thumbText
   } catch {
     settings = { ...DEFAULTS }
   }
@@ -1220,15 +1284,15 @@ async function saveSettings($: Engine, change: Partial<Settings>) {
   settings = { ...settings, ...change }
   applySettings()
   await $.store.set('settings', settings)
-  if (change.idleMinutes !== undefined || change.cacheMinutes !== undefined || change.renewMax !== undefined) {
+  if (change.idleMinutes !== undefined || change.cacheMinutes !== undefined || change.renewMax !== undefined || change.renewLead !== undefined) {
     idleChanged($)
   }
   $.ui.invalidate('ui.render')
 }
 
 // A whole number typed in the pane, kept when it lies in [least, most].
-async function saveNumber($: Engine, field: 'textRoom' | 'idleMinutes' | 'idlePercent' | 'cacheMinutes' | 'renewMax', text: string) {
-  const ranges = { textRoom: [8, 80], idleMinutes: [1, 600], idlePercent: [1, 100], cacheMinutes: [1, 600], renewMax: [1, 48] } as const
+async function saveNumber($: Engine, field: 'textRoom' | 'idleMinutes' | 'idlePercent' | 'cacheMinutes' | 'renewLead' | 'renewMax', text: string) {
+  const ranges = { textRoom: [8, 80], idleMinutes: [1, 600], idlePercent: [1, 100], cacheMinutes: [1, 600], renewLead: [1, 30], renewMax: [1, 48] } as const
   const [least, most] = ranges[field]
   const value = Math.round(Number(text.trim()))
   if (!Number.isFinite(value) || value < least || value > most) {
@@ -1732,97 +1796,204 @@ async function readClaude($: Engine) {
   $.ui.toast(Object.keys(filled).length === 0 ? 'Nothing to fill in from Claude.' : 'Filled in from Claude: ' + Object.keys(filled).join(', ') + '.')
 }
 
-// The settings of the thumb, ⌾, C and H: which show, compact when idle, the cache's time, the
-// language (a list of small flags) and the advisor model for new chats.
+// The settings pane, kept small: a switch per option (each its own colour), the explanations behind a
+// small (i) that shows them while the pointer is on it (a click keeps one open), the timings below a line.
 let isChoosingLanguage = false
-function buttonSettings($: Engine, ui: any, onOff: { value: string; label: string }[]) {
-  const { Box, Text, Input, Button, Select, Svg } = ui
+type Toggle = 'thumb' | 'advisor' | 'compact' | 'handover' | 'previews' | 'symbols'
+const TOGGLES: readonly Toggle[] = ['thumb', 'advisor', 'compact', 'handover', 'previews', 'symbols']
+const TOGGLE_COLOURS: Record<Toggle, string> = {
+  thumb: '#f5a524', advisor: '#8e4ec6', compact: '#3e7bd6', handover: '#30a46c', previews: '#12a594', symbols: '#e54666',
+}
+const INFO = {
+  programs: 'The full path of a program, or the name of one found on this computer; Enter saves. Empty: the system\'s default app. Markdown and text files open in a pane of this chat.',
+  previews: 'Small previews of images and videos on their path buttons.',
+  symbols: 'A symbol for the file type on each path button.',
+  textRoom: 'How many characters the hover text in the band keeps at least.',
+  thumb: 'The thumb sends a short answer as if you had typed it, in the language of the flag. Each language keeps its own text; empty, its default. A right click on the thumb opens these settings.',
+  advisor: '⌾ runs /advisor. The model here is the one of new chats; a right click on ⌾ changes it for one chat.',
+  compact: 'The cache button: its grey field is the prompt cache\'s time left, pale with zz once it has run out. A click renews the cache now; a right click turns auto-renew on or off for this chat (a red dot).',
+  handover: 'The context button: its grey field is the context still free; the symbol turns green at 20 %, blue at 33 %, orange at 50 %, red at 75 %. A click runs its mode; a right click shows the modes (Compact, Handover, Handover, Log & Clear) and the switch for compact when idle (a red dot).',
+  idle: 'Compact when idle: after a reply, with nothing new for these minutes, the chat is compacted if at least this much of its context is used. On or off per chat, with a right click on the context button.',
+  cache: 'How long the prompt cache holds after a reply. This only sets the display and auto-renew; it does not change Claude\'s prompt cache.',
+  claude: 'Fills in what Claude\'s own settings hold: the advisor model and the language. Mods cannot read the cache time.',
+  renew: 'Auto-renew: this many minutes before the cache clock runs out, a short message keeps the cache alive. Each costs a cache read and a short reply; after this many in a row it waits for your next message.',
+} as const
+type Info = keyof typeof INFO
+// The (i) under the pointer, and the ones a click keeps open.
+let infoHovered: Info | undefined
+const infoKept = new Set<Info>()
+
+function switchDrawing(isOn: boolean, colour: string) {
+  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 30 16">' +
+    '<rect x="0.5" y="0.5" width="29" height="15" rx="7.5" fill="' + (isOn ? colour : '#e4e4e4') + '" stroke="' + (isOn ? colour : '#d0d0d0') + '"/>' +
+    '<circle cx="' + (isOn ? 22 : 8) + '" cy="8" r="5.6" fill="#fff"/></svg>'
+}
+function infoDrawing(isOpen: boolean) {
+  const colour = isOpen ? '#3e7bd6' : '#9a9a9a'
+  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 14 14"><circle cx="7" cy="7" r="6.2" fill="none" stroke="' +
+    (isOpen ? colour : '#b4b4b4') + '" stroke-width="1"/>' +
+    '<circle cx="7" cy="4.1" r="0.85" fill="' + colour + '"/><rect x="6.35" y="5.9" width="1.3" height="4.6" rx="0.6" fill="' + colour + '"/></svg>'
+}
+const LINE = '<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1" viewBox="0 0 2000 1"><rect width="2000" height="1" fill="#e4e4e4"/></svg>'
+
+// The switches and the (i) report through their hover regions (hover.tsx), as the band's buttons do.
+function settingsMessage($: Engine, data: { action?: string; id?: string } | undefined) {
+  const id = data?.id
+  if (typeof id !== 'string') {
+    return false
+  }
+  if (id.startsWith('set:')) {
+    const key = id.slice(4) as Toggle
+    if (data?.action === 'press' && TOGGLES.includes(key)) {
+      $.clock.after(0, () => void saveSettings($, { [key]: !settings[key] }))
+    }
+    return true
+  }
+  if (id.startsWith('info:')) {
+    const key = id.slice(5) as Info
+    if (!(key in INFO)) {
+      return true
+    }
+    if (data?.action === 'enter') {
+      infoHovered = key
+    } else if (data?.action === 'leave' && infoHovered === key) {
+      infoHovered = undefined
+    } else if (data?.action === 'press') {
+      if (infoKept.has(key)) {
+        infoKept.delete(key)
+      } else {
+        infoKept.add(key)
+      }
+    }
+    $.ui.invalidate('ui.render')
+    return true
+  }
+  return false
+}
+
+function settingsPane($: Engine, ui: any, found: string[]) {
+  const { Box, Text, Input, Button, Select, Svg, Client } = ui
+  const isDrawn = Svg !== undefined && Client !== undefined
+  const systemApp = platform === 'mac' ? 'Finder / default app' : platform === 'linux' ? 'default app (xdg-open)' : 'Explorer / default app'
+  const region = (id: string, drawing: string, alt: string, wide: number, high: number) => (
+    <Box key={'region-' + id} position="relative" flexShrink={0}>
+      <Svg key={'look-' + id} source={drawing} alt={alt} width={wide} height={high} />
+      <Box position="absolute" top={0} left={0} right={0} bottom={0}>
+        <Client key={'hover-' + id} module="./hover.tsx" props={{ id }} width="100%" height="100%" />
+      </Box>
+    </Box>
+  )
+  const isOpen = (key: Info) => infoHovered === key || infoKept.has(key)
+  const info = (key: Info) => isDrawn ? region('info:' + key, infoDrawing(isOpen(key)), 'info', 14, 14) : undefined
+  const infoText = (keys: Info[], extra = '') => {
+    const shown = keys.filter(isOpen)
+    return shown.length === 0 ? undefined : (
+      <Box key={'info-text-' + keys.join('-')} flexDirection="column" marginLeft="md">
+        {shown.map(key => <Text key={'info-line-' + key} dimColor size="footnote">{INFO[key] + (key === 'programs' ? extra : '')}</Text>)}
+      </Box>
+    )
+  }
+  const row = (key: string, ...children: any[]) => (
+    <Box key={'row-' + key} flexDirection="row" alignItems="center" gap="sm" flexWrap="wrap">{children.filter(child => child !== undefined && child !== false && child !== null)}</Box>
+  )
+  // Every switch in a column of one width, so the switches of the rows stand under each other.
+  const TOGGLE_WIDTH = 24
+  const toggle = (key: Toggle, text: string, glyph?: any) => (
+    <Box key={'toggle-' + key} flexDirection="row" alignItems="center" gap="sm" width={TOGGLE_WIDTH} flexShrink={0}>
+      {isDrawn
+        ? region('set:' + key, switchDrawing(settings[key], TOGGLE_COLOURS[key]), text + (settings[key] ? ' on' : ' off'), 30, 16)
+        : <Select key={key} options={[{ value: 'on', label: 'on' }, { value: 'off', label: 'off' }]} value={settings[key] ? 'on' : 'off'}
+            onSelect={(value: string) => void saveSettings($, { [key]: value === 'on' })} />}
+      {glyph}
+      <Text key={'label-' + key} dimColor={!settings[key]}>{text}</Text>
+      {info(key as Info)}
+    </Box>
+  )
+  // A short field for a number, in a box of a few cells so several stand in a row.
+  const number = (key: 'textRoom' | 'idleMinutes' | 'idlePercent' | 'cacheMinutes' | 'renewLead' | 'renewMax') => (
+    <Box key={'box-' + key} width={15} flexShrink={0}>
+      <Input key={key} value={String(settings[key])} submitLabel="✓" onSubmit={(value: string) => void saveNumber($, key, value)} />
+    </Box>
+  )
+  const words = (key: string, text: string) => <Text key={'w-' + key} dimColor>{text}</Text>
+  // The programs: the labels in one column, so the fields start at one edge.
+  const program = (key: 'folderApp' | 'mediaApp' | 'threeDApp', text: string) => row(key,
+    <Box key={'label-' + key} width={18} flexShrink={0}><Text dimColor>{text}</Text></Box>,
+    <Input key={key} value={settings[key]} placeholder={systemApp} submitLabel="save"
+      onSubmit={(value: string) => void saveSettings($, { [key]: value.trim() })} />,
+  )
   const flag = (one: Language) => Svg === undefined
     ? undefined
     : <Svg key={'flag-' + one} source={FLAGS[one]} alt={LANGUAGE_NAMES[one]} width={21} height={14} />
-  const toggle = (key: 'thumb' | 'advisor' | 'compact' | 'handover', label: string) => (
-    <Select
-      key={key}
-      label={label}
-      options={onOff}
-      value={settings[key] ? 'on' : 'off'}
-      onSelect={(value: string) => void saveSettings($, { [key]: value === 'on' })}
-    />
-  )
   const now = settings.language
+  const thumbGlyph = Svg === undefined ? <Text key="thumb-glyph">👍</Text> : <Svg key="thumb-glyph" source={THUMB} alt="thumb" width={16} height={16} />
+
   return (
-    <Box key="button-settings" flexDirection="column" gap="sm">
+    <Box flexDirection="column" gap="md">
+      {row('h-programs', <Text key="t" bold>Programs</Text>, info('programs'))}
+      {infoText(['programs'], found.length > 0 ? ' Found: ' + found.join(' · ') : '')}
+      {program('folderApp', 'Folders')}
+      {program('mediaApp', 'Images and videos')}
+      {program('threeDApp', '3D files')}
+
       <Text bold>Buttons</Text>
-      {toggle('thumb', 'Thumb (👍, sends the answer below): ')}
-      {toggle('advisor', 'Advisor (⌾): ')}
-      {toggle('compact', 'Compact and cache (C): ')}
-      {toggle('handover', 'Handover (H): ')}
-      <Box key="read-claude" flexDirection="row" alignItems="center" gap="sm">
-        <Button key="read-claude-button" label="Read from Claude" onPress={() => {
-          $.clock.after(0, () => void readClaude($))
-        }} />
-        <Text dimColor>fills in what Claude's own settings hold: advisor model, language</Text>
-      </Box>
-      {claudeNote !== '' && <Text dimColor>{claudeNote}</Text>}
-      <Text dimColor>Advisor model for new chats (a right click on ⌾ changes it for one chat):</Text>
-      <Box key="advisor-models" flexDirection="row" alignItems="center" gap="md">
-        {MODELS.map(model => (
+      {row('band', toggle('previews', 'Previews'), toggle('symbols', 'File symbols'))}
+      {infoText(['previews', 'symbols'])}
+      {row('buttons', toggle('advisor', 'Advisor'), toggle('compact', 'Cache'), toggle('handover', 'Context window'))}
+      {infoText(['advisor', 'compact', 'handover'])}
+      {settings.advisor && row('advisor-models', words('advisor-model', 'Default:'),
+        ...MODELS.map(model => (
           <Button key={'advisor-' + model} plain dimColor={model !== settings.advisorModel} label={MODEL_NAMES[model]} onPress={() => {
             $.clock.after(0, () => void saveSettings($, { advisorModel: model }))
           }} />
-        ))}
-      </Box>
-      <Text dimColor>A right click on C picks, per chat: Manual, Compact when idle (red C) or Auto-renew (green C).</Text>
-      <Text dimColor>Compact when idle: after a reply, with nothing new for this long, the chat is compacted if its context is this full. Enter saves.</Text>
-      <Input
-        key="idleMinutes"
-        label="Minutes: "
-        value={String(settings.idleMinutes)}
-        submitLabel="save"
-        onSubmit={(value: string) => void saveNumber($, 'idleMinutes', value)}
-      />
-      <Input
-        key="idlePercent"
-        label="Context at least (%): "
-        value={String(settings.idlePercent)}
-        submitLabel="save"
-        onSubmit={(value: string) => void saveNumber($, 'idlePercent', value)}
-      />
-      <Text dimColor>Cache: how long the prompt cache holds after a reply; C's grey field empties over this time.</Text>
-      <Text dimColor>This only sets the display. It does not change Claude's prompt cache.</Text>
-      <Input
-        key="cacheMinutes"
-        label="Cache minutes: "
-        value={String(settings.cacheMinutes)}
-        submitLabel="save"
-        onSubmit={(value: string) => void saveNumber($, 'cacheMinutes', value)}
-      />
-      <Text dimColor>Auto-renew: a minute before these cache minutes are up, a short message keeps the cache alive. Each costs a cache read and a short reply; after this many in a row it stops until you write again.</Text>
-      <Input
-        key="renewMax"
-        label="At most in a row: "
-        value={String(settings.renewMax)}
-        submitLabel="save"
-        onSubmit={(value: string) => void saveNumber($, 'renewMax', value)}
-      />
-      <Text dimColor>Language: for now, what the thumb sends.</Text>
-      <Box key="language-now" flexDirection="row" alignItems="center" gap="sm">
-        {flag(now)}
-        <Button key="language-open" plain label={LANGUAGE_NAMES[now] + (isChoosingLanguage ? '  ▴' : '  ▾')} onPress={() => {
-          isChoosingLanguage = !isChoosingLanguage
-          $.ui.invalidate('ui.render')
-        }} />
-      </Box>
-      {isChoosingLanguage && LANGUAGES.map(one => (
-        <Box key={'language-' + one} flexDirection="row" alignItems="center" gap="sm" marginLeft="md">
-          {flag(one)}
-          <Button key={'pick-' + one} plain dimColor={one !== now} label={LANGUAGE_NAMES[one]} onPress={() => {
-            isChoosingLanguage = false
-            $.clock.after(0, () => void saveSettings($, { language: one }))
+        )))}
+      {row('thumb', toggle('thumb', 'Thumb', thumbGlyph),
+        settings.thumb && words('sends', 'sends'),
+        settings.thumb && (
+          <Input key={'thumbText-' + now} value={settings.thumbTexts[now] ?? ''} placeholder={YES[now]} submitLabel="save"
+            onSubmit={(value: string) => void saveSettings($, { thumbTexts: { ...settings.thumbTexts, [now]: value.trim() } })} />
+        ),
+        settings.thumb && flag(now),
+        settings.thumb && (
+          <Button key="language-open" plain dimColor label={LANGUAGE_NAMES[now] + (isChoosingLanguage ? '  ▴' : '  ▾')} onPress={() => {
+            isChoosingLanguage = !isChoosingLanguage
+            $.ui.invalidate('ui.render')
           }} />
+        ))}
+      {infoText(['thumb'])}
+      {settings.thumb && isChoosingLanguage && (
+        <Box key="languages" flexDirection="row" flexWrap="wrap" gap="md" marginLeft="md">
+          {LANGUAGES.map(one => (
+            <Box key={'language-' + one} flexDirection="row" alignItems="center" gap="xs">
+              {flag(one)}
+              <Button key={'pick-' + one} plain dimColor={one !== now} label={LANGUAGE_NAMES[one]} onPress={() => {
+                isChoosingLanguage = false
+                $.clock.after(0, () => void saveSettings($, { language: one }))
+              }} />
+            </Box>
+          ))}
         </Box>
-      ))}
-      <Text dimColor>{'The thumb sends: ' + YES[now]}</Text>
+      )}
+      {row('textRoom', words('room', 'Hover text room'), number('textRoom'), words('room-chars', 'characters'), info('textRoom'))}
+      {infoText(['textRoom'])}
+
+      {Svg !== undefined && <Svg key="line" source={LINE} alt="line" height={1} />}
+      <Text bold>Timings</Text>
+      {row('idle', words('idle-a', 'Auto-Compact after'), number('idleMinutes'), words('idle-b', 'idle min, if'), number('idlePercent'),
+        words('idle-c', '% of the context are used'), info('idle'))}
+      {infoText(['idle'])}
+      {row('cache', words('cache-a', 'Cache clock'), number('cacheMinutes'), words('cache-b', 'min'), info('cache'),
+        <Button key="read-claude-button" plain dimColor label="↻ Read from Claude" onPress={() => {
+          $.clock.after(0, () => void readClaude($))
+        }} />,
+        info('claude'))}
+      {infoText(['cache', 'claude'])}
+      {claudeNote !== '' && <Text dimColor size="footnote">{claudeNote}</Text>}
+      {row('renew', words('renew-a', 'Auto-Renew cache'), number('renewLead'), words('renew-b', 'min before, at most'), number('renewMax'),
+        words('renew-c', 'times in a row'), info('renew'))}
+      {infoText(['renew'])}
+
+      <Text dimColor size="caption">{(platform === '' ? 'unknown' : platform) + (base === '' ? '' : ' · ' + base)}</Text>
     </Box>
   )
 }
@@ -1861,65 +2032,21 @@ export const register: Register = on => {
     await loadSettings($)
     await resolvePrograms($)
     const ui = $.ui.resolve(e) as any
-    const { Box, Text, Input, Select, Button, Svg } = ui
-    const systemApp = platform === 'mac' ? 'Finder / default app' : platform === 'linux' ? 'default app (xdg-open)' : 'Explorer / default app'
-    const onOff = [
-      { value: 'on', label: 'on' },
-      { value: 'off', label: 'off' },
-    ]
-    const program = (key: 'folderApp' | 'mediaApp' | 'threeDApp', label: string) => (
-      <Input
-        key={key}
-        label={label}
-        value={settings[key]}
-        placeholder={systemApp}
-        submitLabel="save"
-        onSubmit={(value: string) => void saveSettings($, { [key]: value.trim() })}
-      />
-    )
     const found = [OPUS !== '' ? 'Directory Opus: ' + OPUS : '', CHAOS_PLAYER !== '' ? 'Chaos Player: ' + CHAOS_PLAYER : '', F3D !== '' ? 'F3D: ' + F3D : ''].filter(line => line !== '')
-    return (
-      <Box flexDirection="column" gap="sm">
-        <Text bold>Programs</Text>
-        <Text dimColor>The full path of a program (or the name of one found below), Enter saves. Empty: the system's default app.</Text>
-        {program('folderApp', 'Folders: ')}
-        {program('mediaApp', 'Images and videos: ')}
-        {program('threeDApp', '3D files (glb, fbx, obj, usd, abc ...): ')}
-        {found.length > 0 && <Text dimColor>{'Found on this computer: ' + found.join(' · ')}</Text>}
-        <Text dimColor>Markdown and text files open in a pane of this chat; everything else in the system's default app.</Text>
-        <Text bold>Band</Text>
-        <Select
-          key="previews"
-          label="Previews of images and videos: "
-          options={onOff}
-          value={settings.previews ? 'on' : 'off'}
-          onSelect={(value: string) => void saveSettings($, { previews: value === 'on' })}
-        />
-        <Select
-          key="symbols"
-          label="Symbols for file types: "
-          options={onOff}
-          value={settings.symbols ? 'on' : 'off'}
-          onSelect={(value: string) => void saveSettings($, { symbols: value === 'on' })}
-        />
-        <Input
-          key="textRoom"
-          label="Room for the hover text (characters, at least): "
-          value={String(settings.textRoom)}
-          submitLabel="save"
-          onSubmit={(value: string) => void saveNumber($, 'textRoom', value)}
-        />
-        {buttonSettings($, ui, onOff)}
-        <Text dimColor>{'System: ' + (platform === '' ? 'unknown' : platform) + (base === '' ? '' : ' · project: ' + base)}</Text>
-      </Box>
-    )
+    // Should drawing the pane fail, it says why instead of staying empty.
+    try {
+      return settingsPane($, ui, found)
+    } catch (error) {
+      await log($, 'settings pane error: ' + String((error as any)?.stack ?? error))
+      return <ui.Text>{'The settings could not be drawn: ' + String(error)}</ui.Text>
+    }
   })
 
   // The band's path regions (hit.tsx) post a left click as `open`, a right click as `show`,
   // and the middle button's press, drag and release.
   on('ui.message', async ($, e, next) => {
     const data = (e as any).data as { action?: string; path?: string; id?: string; dx?: number } | undefined
-    if (handoffMessage($, data)) {
+    if (handoffMessage($, data) || settingsMessage($, data)) {
       return {}
     }
     const path = data?.path
