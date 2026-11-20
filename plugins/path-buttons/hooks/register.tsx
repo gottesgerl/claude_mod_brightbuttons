@@ -1,20 +1,28 @@
-import type { Engine, Register } from 'claude-code'
+import type { EngineInterface as Engine, Register } from 'claude-code'
 
 // One round, single-colour emoji per path: the same dot sits in front of the path
 // in the text and on its button, so the colour is the link between the two.
 const DOTS = ['🔴', '🟠', '🟢', '🔵', '🟡', '🟣', '⚪']
 const MAX_BUTTONS = DOTS.length
 
-// Backticked paths may hold spaces; bare ones end at whitespace or quoting.
-const PATH = /`([A-Za-z]:[\\/][^`\n]+)`|(?<![A-Za-z0-9])([A-Za-z]:[\\/][^\s`"'<>|*?()[\]]+)/g
+// Absolute paths on any system: a drive letter (C:\...), a POSIX path (/Users/..., /home/...)
+// or one under the home folder (~/...). Backticked paths may hold spaces; bare ones end at
+// whitespace or quoting. A bare POSIX path counts only under a usual top folder, so `and/or`
+// or a URL's path does not turn into a button.
+const PATH =
+  /`([A-Za-z]:[\\/][^`\n]+|~?\/[^`\s\n/][^`\n]*\/[^`\n]+)`|(?<![A-Za-z0-9])([A-Za-z]:[\\/][^\s`"'<>|*?()[\]]+)|(?<![\w:/.~-])(~?\/(?:Users|home|Volumes|mnt|media|opt|srv|tmp|var|private|Applications|Library)\/[^\s`"'<>|*?()[\]]+)/g
 
 // Short relative paths (`blender\shot\...`) resolve against the session's project folder (base).
-// A relative path only counts when its first folder is one of the `relativeFolders` option
-// or an alias, so ordinary words with a slash do not turn into buttons. An alias stands for a
-// longer folder (`aliases` option: `name=folder\sub; name2=other`). Both empty: absolute paths only.
+// A relative path only counts when its first folder is a folder at the top of the project (read
+// from disk, nothing to set up) or an alias, so ordinary words with a slash do not turn into buttons.
+// An alias stands for a deeper folder (optional `aliases` option: `name=folder\sub; name2=other`).
 let base = ''
+let home = ''
 let ALIASES: Record<string, string> = {}
-// Matches nothing until the options name a folder.
+let topFolders: string[] = []
+let topFoldersOf = ''
+let topFoldersAt = 0
+// Matches nothing until a project folder or an alias is known.
 let REL = /(?!)()()/g
 
 const listOf = (value: unknown) =>
@@ -28,10 +36,15 @@ function configure(options: Readonly<Record<string, unknown>>) {
   for (const pair of listOf(options.aliases)) {
     const [name = '', target = ''] = pair.split('=').map(part => part.trim())
     if (name !== '' && target !== '') {
-      ALIASES[name] = target.replace(/\//g, '\\').replace(/^\\+|\\+$/g, '')
+      ALIASES[name] = target.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
     }
   }
-  const roots = [...listOf(options.relativeFolders), ...Object.keys(ALIASES)]
+  buildRelative()
+}
+
+// The pattern for relative paths: the project's top folders and the aliases as first part.
+function buildRelative() {
+  const roots = [...topFolders, ...Object.keys(ALIASES)]
   if (roots.length === 0) {
     REL = /(?!)()()/g
     return
@@ -53,7 +66,11 @@ const clean = (raw: string) =>
     .trim()
     .replace(/[.,;:!]+$/, '')
     .replace(/:\d+(:\d+)?$/, '')
-    .replace(/\//g, '\\')
+
+// The parts of a path, whichever separator it uses, and the separator a path is written with.
+const partsOf = (path: string) => path.split(/[\\/]/).filter(part => part !== '')
+const sepOf = (path: string) => (/^[A-Za-z]:/.test(path) || path.includes('\\') ? '\\' : '/')
+const nameOf = (path: string) => partsOf(path).pop() ?? path
 
 // The shape tells the kind, the colour links text and button: hearts for videos, squares for
 // images, dots for everything else. All lists share the colour order.
@@ -79,33 +96,56 @@ const markFor = dotFor
 // A cleaned path as an absolute one: relative paths get the project folder (and their alias) in front.
 function absolute(raw: string) {
   const path = clean(raw)
-  if (/^[A-Za-z]:\\/.test(path)) {
+  if (/^[A-Za-z]:[\\/]/.test(path)) {
+    return path.replace(/\//g, '\\')
+  }
+  if (path.startsWith('~/')) {
+    return home === '' ? '' : home + path.slice(1).replace(/\//g, sepOf(home))
+  }
+  if (path.startsWith('/')) {
     return path
   }
   if (base === '') {
     return ''
   }
-  const [first = '', ...rest] = path.split('\\')
+  const [first = '', ...rest] = partsOf(path)
   const alias = Object.keys(ALIASES).find(key => key.toLowerCase() === first.toLowerCase())
-  return base + '\\' + (alias === undefined ? path : [ALIASES[alias], ...rest].join('\\'))
+  const parts = alias === undefined ? [first, ...rest] : [...partsOf(ALIASES[alias] ?? ''), ...rest]
+  const sep = sepOf(base)
+  return base + sep + parts.join(sep)
 }
 
 // The project folder of the session, so relative paths open in the project the chat runs in.
 async function syncBase($: Engine) {
+  await resolvePlatform($)
   try {
-    const root = (await $.session.root()).replace(/\//g, '\\').replace(/\\+$/, '')
-    if (/^[A-Za-z]:\\/.test(root)) {
+    const root = (await $.session.root()).replace(/[\\/]+$/, '')
+    if (/^[A-Za-z]:[\\/]/.test(root)) {
+      base = root.replace(/\//g, '\\')
+    } else if (root.startsWith('/')) {
       base = root
     }
   } catch {
     // keep the last known folder
+  }
+  // The folders at the top of the project, read again when the project changes or after half a minute.
+  if (base !== '' && (base !== topFoldersOf || Date.now() - topFoldersAt > 30000)) {
+    topFoldersOf = base
+    topFoldersAt = Date.now()
+    try {
+      const entries = await $.fs.list(base)
+      topFolders = entries.filter(entry => entry.kind === 'dir').map(entry => entry.name)
+    } catch {
+      topFolders = []
+    }
+    buildRelative()
   }
 }
 
 // The distinct paths of a text (absolute and relative), in order of appearance, as absolute paths.
 function pathsOf(text: string) {
   const hits = [...text.matchAll(PATH), ...text.matchAll(REL)]
-    .map(match => ({ at: match.index ?? 0, raw: match[1] ?? match[2] ?? '' }))
+    .map(match => ({ at: match.index ?? 0, raw: match[1] ?? match[2] ?? match[3] ?? '' }))
     .sort((a, b) => a.at - b.at)
   const found: string[] = []
   for (const { raw } of hits) {
@@ -117,8 +157,58 @@ function pathsOf(text: string) {
   return found
 }
 
-// Folders go to Directory Opus, images and videos to the Chaos Player, the rest to
-// the default app (explorer.exe). Each falls back to explorer.exe when not installed.
+// Which system the session runs on, read once from the environment: the open command,
+// the temp folder and where ffmpeg may sit depend on it.
+let platform: 'windows' | 'mac' | 'linux' | '' = ''
+let TEMP = ''
+
+async function resolvePlatform($: Engine) {
+  if (platform !== '') {
+    return
+  }
+  const windir = await $.env.get('windir')
+  if (windir !== undefined || (await $.env.get('OS')) === 'Windows_NT') {
+    platform = 'windows'
+  } else if (await $.fs.exists('/System/Library/CoreServices')) {
+    platform = 'mac'
+  } else {
+    platform = 'linux'
+  }
+  home = ((await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME')) ?? '').replace(/[\\/]+$/, '')
+  TEMP = ((await $.env.get('TEMP')) ?? (await $.env.get('TMPDIR')) ?? (platform === 'windows' ? 'C:\\Windows\\Temp' : '/tmp')).replace(/[\\/]+$/, '')
+}
+
+const tempFile = (name: string) => TEMP + sepOf(TEMP) + name
+
+// The person's choices from the settings pane, kept across sessions in the plugin's store.
+// An empty program means automatic: Directory Opus and the Chaos Player where installed
+// (Windows), else the system's own app.
+type Settings = { folderApp: string; mediaApp: string; previews: boolean; symbols: boolean }
+const DEFAULTS: Settings = { folderApp: '', mediaApp: '', previews: true, symbols: true }
+let settings: Settings = { ...DEFAULTS }
+let isSettingsLoaded = false
+
+async function loadSettings($: Engine) {
+  if (isSettingsLoaded) {
+    return
+  }
+  isSettingsLoaded = true
+  try {
+    const stored = (await $.store.get('settings')) as Partial<Settings> | undefined
+    settings = { ...DEFAULTS, ...(stored ?? {}) }
+  } catch {
+    settings = { ...DEFAULTS }
+  }
+}
+
+async function saveSettings($: Engine, change: Partial<Settings>) {
+  settings = { ...settings, ...change }
+  await $.store.set('settings', settings)
+  $.ui.invalidate('ui.render')
+}
+
+// Folders go to Directory Opus, images and videos to the Chaos Player, the rest to the
+// system's default app. Each falls back to the default app when not installed.
 const OPUS_SUBPATH = '\\GPSoftware\\Directory Opus\\dopusrt.exe'
 const CHAOS_SUBPATH = '\\Chaos\\Player\\chaosplayer_qt5.exe'
 let OPUS = ''
@@ -131,6 +221,9 @@ async function resolvePrograms($: Engine) {
     return
   }
   isResolved = true
+  if (platform !== 'windows') {
+    return
+  }
   const candidates = [
     await $.env.get('ProgramFiles'),
     await $.env.get('ProgramW6432'),
@@ -201,6 +294,7 @@ const MEDIA = /\.(png|jpe?g|webp|bmp|gif|tiff?|exr|hdr|tga|dpx|mp4|mov|mkv|avi|w
 
 // Text files (TEXT, above) show in a pane of this chat instead of an outside app.
 const VIEWER = 'path-viewer'
+const SETTINGS = 'path-buttons-settings'
 const VIEW_MAX_CHARS = 200000
 let viewing: { path: string; text: string; isMarkdown: boolean } | undefined
 
@@ -209,14 +303,33 @@ async function view($: Engine, path: string) {
   const isCut = whole.length > VIEW_MAX_CHARS
   viewing = {
     path,
-    text: isCut ? whole.slice(0, VIEW_MAX_CHARS) + '\n\n[... gekuerzt]' : whole,
+    text: isCut ? whole.slice(0, VIEW_MAX_CHARS) + '\n\n[... cut]' : whole,
     isMarkdown: /\.md$/i.test(path),
   }
-  await $.ui.open({ id: VIEWER, title: path.split('\\').pop() ?? path })
+  await $.ui.open({ id: VIEWER, title: nameOf(path) })
   $.ui.invalidate('ui.render')
 }
 
+// Starts a chosen program on a path without waiting for it: a long-running app must not be a
+// child of this call, which ends it after 30 s.
+function launch(program: string, path: string) {
+  if (platform === 'windows') {
+    return ['cmd.exe', '/c', 'start', '', program, path]
+  }
+  if (platform === 'mac' && /\.app\/?$/i.test(program)) {
+    return ['open', '-a', program, path]
+  }
+  return ['sh', '-c', 'nohup "$0" "$1" >/dev/null 2>&1 &', program, path]
+}
+
+// The system's own way to open a path in its default app.
+function openDefault(path: string) {
+  return platform === 'windows' ? ['explorer.exe', path] : platform === 'mac' ? ['open', path] : ['xdg-open', path]
+}
+
 async function open($: Engine, path: string) {
+  await resolvePlatform($)
+  await loadSettings($)
   let kind: 'file' | 'dir' | 'other' | undefined
   try {
     kind = (await $.fs.stat(path)).kind
@@ -224,7 +337,7 @@ async function open($: Engine, path: string) {
     kind = undefined
   }
   if (kind === undefined) {
-    $.ui.toast('Pfad gibt es nicht: ' + path)
+    $.ui.toast('Path does not exist: ' + path)
     return
   }
   const isFolder = kind === 'dir'
@@ -232,31 +345,32 @@ async function open($: Engine, path: string) {
     try {
       await view($, path)
     } catch (error) {
-      $.ui.toast('Anzeigen fehlgeschlagen: ' + String(error).slice(0, 150))
+      $.ui.toast('Could not show: ' + String(error).slice(0, 150))
     }
     return
   }
   await resolvePrograms($)
-  let command = ['explorer.exe', path]
-  if (isFolder && OPUS !== '') {
+  let command = openDefault(path)
+  if (isFolder && settings.folderApp !== '') {
+    command = launch(settings.folderApp, path)
+  } else if (!isFolder && MEDIA.test(path) && settings.mediaApp !== '') {
+    command = launch(settings.mediaApp, path)
+  } else if (isFolder && OPUS !== '') {
     // dopusrt talks to the running Opus: jump to the folder in a tab (an existing one if open).
     command = [OPUS, '/cmd', 'Go', path, 'NEWTAB=findexisting']
   } else if (!isFolder && MEDIA.test(path) && CHAOS_PLAYER !== '') {
-    // A long-running player must not be a child of this call, which kills it after 30 s:
-    // `start` hands it over and returns at once.
-    command = ['cmd.exe', '/c', 'start', '', CHAOS_PLAYER, path]
+    command = launch(CHAOS_PLAYER, path)
   }
   try {
     const ran = await $.process.run(command)
-    // The exit code of explorer.exe and of a launcher that hands over means nothing,
+    // The exit code of a default app or of a launcher that hands over means nothing,
     // but Opus reporting an error is worth seeing.
     if (command[0] === OPUS && ran.exitCode !== 0) {
-      $.ui.toast('Directory Opus: Exit ' + ran.exitCode + ' ' + ran.stderr.slice(0, 120))
+      $.ui.toast('Directory Opus: exit ' + ran.exitCode + ' ' + ran.stderr.slice(0, 120))
     }
     if (command[0] === OPUS) {
       // Go switches the tab but leaves the window where it was: bring it forward.
-      const temp = (await $.env.get('TEMP')) ?? 'C:\\Windows\\Temp'
-      const script = temp + '\\path-buttons-focus-opus.ps1'
+      const script = tempFile('path-buttons-focus-opus.ps1')
       await $.fs.write(script, FOCUS_OPUS)
       await $.process.run(
         ['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script, '-Folder', path],
@@ -264,7 +378,7 @@ async function open($: Engine, path: string) {
       )
     }
   } catch (error) {
-    $.ui.toast('Oeffnen fehlgeschlagen: ' + String(error).slice(0, 150))
+    $.ui.toast('Could not open: ' + String(error).slice(0, 150))
   }
 }
 
@@ -323,20 +437,19 @@ const ICONS: { test: (path: string) => boolean; draw: (colour: string) => string
       `<path transform="translate(1 0.5)" fill="${c}" fill-rule="evenodd" d="M2.50 12.00a8.5 8.5 0 1 0 17.0 0a8.5 8.5 0 1 0 -17.0 0zM8.90 7.30a2.1 2.1 0 1 0 4.2 0a2.1 2.1 0 1 0 -4.2 0zM13.37 10.55a2.1 2.1 0 1 0 4.2 0a2.1 2.1 0 1 0 -4.2 0zM11.66 15.80a2.1 2.1 0 1 0 4.2 0a2.1 2.1 0 1 0 -4.2 0zM6.14 15.80a2.1 2.1 0 1 0 4.2 0a2.1 2.1 0 1 0 -4.2 0zM4.43 10.55a2.1 2.1 0 1 0 4.2 0a2.1 2.1 0 1 0 -4.2 0zM10.10 12.00a0.9 0.9 0 1 0 1.8 0a0.9 0.9 0 1 0 -1.8 0z"/>`,
   },
   {
-    // Data and settings (JSON, YAML, XML, INI, OCIO ...): a gear with eight short teeth and a small hole.
+    // Data and settings (JSON, YAML, XML, INI, OCIO ...): a gear with eight short teeth and a hole.
     test: path => /\.(json|jsonl|json5|ya?ml|xml|toml|ini|cfg|conf|ocio|env)$/i.test(path),
     draw: c =>
-      `<mask id="hub"><rect width="24" height="24" fill="#fff"/><circle cx="12" cy="12.5" r="1.5" fill="#000"/></mask>` +
-      `<g fill="${c}" mask="url(#hub)"><circle cx="12" cy="12.5" r="7"/>` +
-      `<rect x="10.4" y="4.2" width="3.2" height="2.3" rx="0.6" transform="rotate(0 12 12.5)"/><rect x="10.4" y="4.2" width="3.2" height="2.3" rx="0.6" transform="rotate(45 12 12.5)"/><rect x="10.4" y="4.2" width="3.2" height="2.3" rx="0.6" transform="rotate(90 12 12.5)"/><rect x="10.4" y="4.2" width="3.2" height="2.3" rx="0.6" transform="rotate(135 12 12.5)"/><rect x="10.4" y="4.2" width="3.2" height="2.3" rx="0.6" transform="rotate(180 12 12.5)"/><rect x="10.4" y="4.2" width="3.2" height="2.3" rx="0.6" transform="rotate(225 12 12.5)"/><rect x="10.4" y="4.2" width="3.2" height="2.3" rx="0.6" transform="rotate(270 12 12.5)"/><rect x="10.4" y="4.2" width="3.2" height="2.3" rx="0.6" transform="rotate(315 12 12.5)"/></g>`,
+      `<mask id="hub"><rect width="24" height="24" fill="#fff"/><circle cx="12" cy="12.5" r="2.3" fill="#000"/></mask>` +
+      `<g fill="${c}" mask="url(#hub)"><circle cx="12" cy="12.5" r="6.3"/>` +
+      `<rect x="10.55" y="5.0" width="2.9" height="2.2" rx="0.6" transform="rotate(0 12 12.5)"/><rect x="10.55" y="5.0" width="2.9" height="2.2" rx="0.6" transform="rotate(45 12 12.5)"/><rect x="10.55" y="5.0" width="2.9" height="2.2" rx="0.6" transform="rotate(90 12 12.5)"/><rect x="10.55" y="5.0" width="2.9" height="2.2" rx="0.6" transform="rotate(135 12 12.5)"/><rect x="10.55" y="5.0" width="2.9" height="2.2" rx="0.6" transform="rotate(180 12 12.5)"/><rect x="10.55" y="5.0" width="2.9" height="2.2" rx="0.6" transform="rotate(225 12 12.5)"/><rect x="10.55" y="5.0" width="2.9" height="2.2" rx="0.6" transform="rotate(270 12 12.5)"/><rect x="10.55" y="5.0" width="2.9" height="2.2" rx="0.6" transform="rotate(315 12 12.5)"/></g>`,
   },
   {
-    // A 3D exchange file (USD, glTF, FBX, OBJ, Alembic ...): a disc with the three edges of a cube's corner cut out.
+    // A 3D exchange file (USD, glTF, FBX, OBJ, Alembic ...): a cube, its sides in two lighter shades.
     test: path => /\.(usd|usda|usdc|usdz|glb|gltf|fbx|obj|abc|ply|stl)$/i.test(path),
     draw: c =>
-      `<mask id="corner"><rect width="24" height="24" fill="#fff"/>` +
-      `<path d="M12 12.5L12.00 7.50M12 12.5L16.33 15.00M12 12.5L7.67 15.00" fill="none" stroke="#000" stroke-width="1.9" stroke-linecap="round"/></mask>` +
-      `<circle cx="12" cy="12.5" r="9.2" fill="${c}" mask="url(#corner)"/>`,
+      `<g fill="${c}"><path d="M12 4.2 L19.6 8.4 L12 12.6 L4.4 8.4 Z"/><path opacity="0.75" d="M4.2 9.6 L11.3 13.6 V21.6 L4.2 17.6 Z"/>` +
+      `<path opacity="0.5" d="M19.8 9.6 L12.7 13.6 V21.6 L19.8 17.6 Z"/></g>`,
   },
   {
     // A PDF: a filled page, its corner folded down.
@@ -360,7 +473,7 @@ const ICONS: { test: (path: string) => boolean; draw: (colour: string) => string
   },
   {
     // A folder: no extension on the last part.
-    test: path => !/\.[A-Za-z0-9]{1,5}$/.test(path.split('\\').filter(part => part !== '').pop() ?? ''),
+    test: path => !/\.[A-Za-z0-9]{1,5}$/.test(nameOf(path)),
     draw: c =>
       // Drawn at four fifths and a little low, so it stands no bigger than a dot and sits on the line.
       `<path transform="translate(2.4 3.9) scale(0.8)" fill="${c}" d="M2 6.5A1.5 1.5 0 0 1 3.5 5h5l2 2h10A1.5 1.5 0 0 1 22 8.5v10a1.5 1.5 0 0 1-1.5 1.5h-17A1.5 1.5 0 0 1 2 18.5z"/>`,
@@ -374,10 +487,16 @@ async function resolveFfmpeg($: Engine) {
     return
   }
   isFfmpegResolved = true
-  const candidates = [await $.env.get('ProgramFiles'), await $.env.get('ProgramW6432')]
-  for (const root of candidates) {
-    if (root !== undefined && FFMPEG === '' && (await $.fs.exists(root + '\\ffmpeg\\bin\\ffmpeg.exe'))) {
-      FFMPEG = root + '\\ffmpeg\\bin\\ffmpeg.exe'
+  await resolvePlatform($)
+  const candidates =
+    platform === 'windows'
+      ? [await $.env.get('ProgramFiles'), await $.env.get('ProgramW6432')].map(root =>
+          root === undefined ? undefined : root + '\\ffmpeg\\bin\\ffmpeg.exe',
+        )
+      : ['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg', '/usr/bin/ffmpeg']
+  for (const candidate of candidates) {
+    if (candidate !== undefined && FFMPEG === '' && (await $.fs.exists(candidate))) {
+      FFMPEG = candidate
     }
   }
   if (FFMPEG === '') {
@@ -393,9 +512,8 @@ async function makeThumb($: Engine, path: string) {
     for (const char of key) {
       hash = (hash * 31 + char.charCodeAt(0)) | 0
     }
-    const temp = (await $.env.get('TEMP')) ?? 'C:\\Windows\\Temp'
     // A small JPEG: the band's whole drawing has a size limit, and seven PNG previews outgrow it.
-    const out = temp + '\\path-buttons-thumb-' + (hash >>> 0).toString(16) + '.jpg'
+    const out = tempFile('path-buttons-thumb-' + (hash >>> 0).toString(16) + '.jpg')
     const started = Date.now() - 2000
     const frame = ['-frames:v', '1', '-vf', 'scale=-2:' + THUMB_HEIGHT + ',hue=s=0,lutyuv=y=115+val*0.45', '-q:v', '6', out]
     // A video shows its frame at one second (a poster); a clip shorter than that its first frame.
@@ -463,6 +581,73 @@ let copiedNote: string | undefined
 export const register: Register = (on, options) => {
   configure(options)
 
+  // /path-buttons opens the settings pane.
+  on('session.start', async ($, e, next) => {
+    await $.command.register({ name: 'path-buttons', description: 'Settings of the path buttons: programs, previews, symbols' })
+    return next(e)
+  })
+
+  on('command.run', { command: 'path-buttons' }, async $ => {
+    await resolvePlatform($)
+    await loadSettings($)
+    await resolvePrograms($)
+    await $.ui.open({ id: SETTINGS, title: 'Path buttons' })
+    return { text: 'Path buttons settings opened.' }
+  })
+
+  on('ui.render', { component: 'Pane', requestId: SETTINGS }, async ($, e) => {
+    await resolvePlatform($)
+    await loadSettings($)
+    await resolvePrograms($)
+    const { Box, Text, Input, Select } = $.ui.resolve(e) as any
+    const systemApp = platform === 'mac' ? 'Finder / default app' : platform === 'linux' ? 'default app (xdg-open)' : 'Explorer / default app'
+    const autoFolder = OPUS !== '' ? 'Directory Opus (found)' : systemApp
+    const autoMedia = CHAOS_PLAYER !== '' ? 'Chaos Player (found)' : systemApp
+    const onOff = [
+      { value: 'on', label: 'on' },
+      { value: 'off', label: 'off' },
+    ]
+    return (
+      <Box flexDirection="column" gap="sm">
+        <Text bold>Programs</Text>
+        <Text dimColor>The full path of a program, Enter saves. Empty: automatic.</Text>
+        <Input
+          key="folderApp"
+          label="Folders: "
+          value={settings.folderApp}
+          placeholder={'automatic: ' + autoFolder}
+          submitLabel="save"
+          onSubmit={(value: string) => void saveSettings($, { folderApp: value.trim() })}
+        />
+        <Input
+          key="mediaApp"
+          label="Images and videos: "
+          value={settings.mediaApp}
+          placeholder={'automatic: ' + autoMedia}
+          submitLabel="save"
+          onSubmit={(value: string) => void saveSettings($, { mediaApp: value.trim() })}
+        />
+        <Text dimColor>Markdown and text files open in a pane of this chat; everything else in the system's default app.</Text>
+        <Text bold>Band</Text>
+        <Select
+          key="previews"
+          label="Previews of images and videos: "
+          options={onOff}
+          value={settings.previews ? 'on' : 'off'}
+          onSelect={(value: string) => void saveSettings($, { previews: value === 'on' })}
+        />
+        <Select
+          key="symbols"
+          label="Symbols for file types: "
+          options={onOff}
+          value={settings.symbols ? 'on' : 'off'}
+          onSelect={(value: string) => void saveSettings($, { symbols: value === 'on' })}
+        />
+        <Text dimColor>{'System: ' + (platform === '' ? 'unknown' : platform) + (base === '' ? '' : ' · project: ' + base)}</Text>
+      </Box>
+    )
+  })
+
   // The band's path regions (hit.tsx) post a left click as `open`, a right click as `show`.
   on('ui.message', async ($, e) => {
     const data = (e as any).data as { action?: string; path?: string } | undefined
@@ -480,10 +665,10 @@ export const register: Register = (on, options) => {
       // Right click: the full path goes to the clipboard, a dim note in the band says so for a moment.
       const copied = await $.ui.copy({ text: path, surface: e.surface })
       if (!copied.isCopied) {
-        $.ui.toast('Kopieren ging nicht: ' + path)
+        $.ui.toast('Could not copy: ' + path)
         return {}
       }
-      copiedNote = 'Pfad kopiert'
+      copiedNote = 'Path copied'
       $.ui.invalidate('ui.render')
       const note = copiedNote
       $.clock.after(1500, () => {
@@ -501,7 +686,7 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'Pane', requestId: VIEWER }, async ($, e) => {
     const { Box, Text, Markdown } = $.ui.resolve(e)
     if (viewing === undefined) {
-      return <Text dimColor>Keine Datei geoeffnet.</Text>
+      return <Text dimColor>No file open.</Text>
     }
     return (
       <Box flexDirection="column">
@@ -525,18 +710,21 @@ export const register: Register = (on, options) => {
       }
       const tail = quoted === undefined ? (raw.match(/[.,;:!]+$/)?.[0] ?? '') : ''
       // A last part without an extension is a folder: it shows with its parent, as many folders share a name.
-      const parts = path.split('\\').filter(part => part !== '')
+      const parts = partsOf(path)
       const isFolder = !/\.[A-Za-z0-9]{1,5}$/.test(parts[parts.length - 1] ?? '')
-      const name = parts.slice(isFolder ? -2 : -1).join('\\') || path
+      const name = parts.slice(isFolder ? -2 : -1).join(sepOf(path)) || path
       return `${markFor(path)} \`${name}\`${tail}`
     }
     // Marked paths wait as placeholders, so the relative pass cannot match a shortened name again.
     const inline = (part: string) => {
       const done: string[] = []
-      const park = (...args: string[]) => {
-        const marked = dotted(args[0], args[1], args[2])
+      // PATH has three groups (quoted, bare drive path, bare POSIX path), REL two; past them come
+      // the offset (a number) and the text.
+      const park = (...args: unknown[]) => {
+        const group = (i: number) => (typeof args[i] === 'string' ? (args[i] as string) : undefined)
+        const marked = dotted(args[0] as string, group(1), group(2) ?? group(3))
         if (marked === args[0]) {
-          return marked
+          return marked as string
         }
         done.push(marked)
         return `\u0000${done.length - 1}\u0000`
@@ -544,7 +732,7 @@ export const register: Register = (on, options) => {
       return part
         .replace(PATH, park)
         .replace(REL, park)
-        .replace(/\u0000(\d+)\u0000/g, (_, i) => done[Number(i)])
+        .replace(/\u0000(\d+)\u0000/g, (_, i) => done[Number(i)] ?? '')
     }
     const text = e.props.text
       .split(/(^```[^\n]*\n[\s\S]*?^```[^\n]*$)/m)
@@ -562,6 +750,7 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const below = await next(e)
     await syncBase($)
+    await loadSettings($)
     const messages = await $.session.messages()
     // Newest replies first, until the buttons are full; shown newest on the left.
     const paths: string[] = []
@@ -586,7 +775,7 @@ export const register: Register = (on, options) => {
     // Images and videos show as a pale grey preview with bars in their symbol's colour; until the
     // preview is ready (or when it cannot be made) the symbol stands in.
     const previewOf = (path: string, i: number) => {
-      if (Svg === undefined || !MEDIA.test(path)) {
+      if (Svg === undefined || !settings.previews || !MEDIA.test(path)) {
         return null
       }
       const key = path.toLowerCase()
@@ -603,7 +792,7 @@ export const register: Register = (on, options) => {
         return null
       }
       const symbol = dotFor(path)
-      const colour = FRAMES[colours.get(key) ?? 0]
+      const colour = FRAMES[colours.get(key) ?? 0] ?? '#b0b0b0'
       const bar = Math.max(2, Math.round(thumb.height * 0.13))
       const width = Math.max(1, Math.round((THUMB_DRAWN * thumb.width) / Math.max(1, thumb.height)))
       const data = 'data:image/jpeg;base64,' + thumb.jpg
@@ -620,7 +809,7 @@ export const register: Register = (on, options) => {
       const spaces = ' '.repeat(Math.max(1, Math.round(width / 14)))
       return (
         <Box key={'thumb-box-' + i} position="relative" marginLeft="xs" flexShrink={0}>
-          <Svg key={'thumb-' + i} source={source} alt={symbol + ' ' + (path.split('\\').pop() ?? path)} width={width} height={THUMB_DRAWN} />
+          <Svg key={'thumb-' + i} source={source} alt={symbol + ' ' + nameOf(path)} width={width} height={THUMB_DRAWN} />
           <Box position="absolute" top={0} left={0} right={0} bottom={0} justifyContent="center" alignItems="center">
             {Client !== undefined ? (
               <Client key={'hit-' + i} module="./hit.tsx" props={{ path, label: spaces }} width="100%" height="100%" />
@@ -635,16 +824,16 @@ export const register: Register = (on, options) => {
     }
     // Blender files, text files and folders show a flat symbol in their colour; a click works as on a dot.
     const iconOf = (path: string, i: number) => {
-      const icon = Svg === undefined || Client === undefined ? undefined : ICONS.find(one => one.test(path))
+      const icon = Svg === undefined || Client === undefined || !settings.symbols ? undefined : ICONS.find(one => one.test(path))
       if (icon === undefined) {
         return null
       }
-      const colour = FRAMES[colours.get(path.toLowerCase()) ?? 0]
+      const colour = FRAMES[colours.get(path.toLowerCase()) ?? 0] ?? '#b0b0b0'
       const source =
         `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">${icon.draw(colour)}</svg>`
       return (
         <Box key={'icon-box-' + i} position="relative" marginX="xs" flexShrink={0}>
-          <Svg key={'icon-' + i} source={source} alt={dotFor(path) + ' ' + (path.split('\\').pop() ?? path)} width={ICON_DRAWN} height={ICON_DRAWN} />
+          <Svg key={'icon-' + i} source={source} alt={dotFor(path) + ' ' + nameOf(path)} width={ICON_DRAWN} height={ICON_DRAWN} />
           <Box position="absolute" top={0} left={0} right={0} bottom={0}>
             <Client key={'hit-' + i} module="./hit.tsx" props={{ path, label: ' ' }} width="100%" height="100%" />
           </Box>
@@ -656,7 +845,7 @@ export const register: Register = (on, options) => {
         {(copiedNote !== undefined || (hovered !== undefined && paths.includes(hovered))) && (
           <Box key="hovered-name" marginRight="md" flexShrink={1} minWidth={0}>
             {/* One line only: a long name is cut in the middle, so the band keeps its height. */}
-            <Text dimColor wrap="truncate-middle">{copiedNote ?? hovered?.split('\\').filter(part => part !== '').pop() ?? hovered}</Text>
+            <Text dimColor wrap="truncate-middle">{copiedNote ?? (hovered === undefined ? undefined : nameOf(hovered))}</Text>
           </Box>
         )}
         {paths.map((path, i) => previewOf(path, i) ?? iconOf(path, i) ?? (Client !== undefined ? (

@@ -1,123 +1,127 @@
-# Claude-Code-Mods von gottesgerl
+# Claude Code mods by gottesgerl
 
-Zwei Mods für Claude Code (Desktop-App, Windows), die zusammen eine Leiste über dem Prompt bilden.
+Two mods for Claude Code (desktop app and terminal) that together form a band above the prompt.
 
-| Mod | Was es tut |
+| Mod | What it does |
 | --- | --- |
-| `path-buttons` | Ein farbiges Symbol pro Pfad aus den letzten Antworten, bei Bildern und Videos ein Vorschaubild. Linksklick öffnet, Rechtsklick kopiert den Pfad. |
-| `handoff-button` | `⌾` für `/advisor opus`, `C` für `/compact`, `H` bittet um ein Handover, `⤓` komprimiert den Chat, benennt ihn in `[A]` um, startet einen neuen Chat `[B]` mit der Übergabe und archiviert den alten. Setzt die Buttons von `path-buttons` links neben das H. |
+| `path-buttons` | A coloured button per path from the latest replies, a small preview for images and videos. Left click opens, right click copies the path. Windows, macOS and Linux. |
+| `handoff-button` | `⌾` runs `/advisor opus`, `C` runs `/compact`, `H` asks for a handover, `⤓` exports the chat, renames it `[A]`, starts a new chat `[B]` with the handover and archives the old one. Lays the `path-buttons` row beside its own. Windows. |
 
-Das `handoff-button` braucht `path-buttons` nicht, und `path-buttons` braucht kein `handoff-button`. Ohne H stehen die Buttons allein in der Leiste. Mit beiden Mods stehen sie links neben dem H, dafür gibt `handoff-button` den Inhalt anderer Mods in der Leiste weiter.
+Each mod works on its own. With both, the path buttons stand left of the H.
 
 ## Installation
 
-In einer PowerShell (Claude Code muss installiert sein, das Konto spielt keine Rolle):
+In a terminal (Claude Code must be installed):
 
-```powershell
+```
 claude plugin marketplace add gottesgerl/claude_mod_pathbuttons
 claude plugin install path-buttons@path-buttons
 claude plugin install handoff-button@path-buttons
 ```
 
-Danach Claude neu starten. Die Mods laufen in jeder neuen Sitzung, auch in der Desktop-App.
+Then restart Claude. The mods run in every new session, the desktop app included.
 
-Update auf eine neue Version:
+Updating to a new version:
 
-```powershell
+```
 claude plugin marketplace update path-buttons
 claude plugin update path-buttons
 claude plugin update handoff-button
 ```
 
-Hast du ein Mod schon als eigenen Ordner unter `~/.claude/mods/` eingetragen (`CLAUDE_CODE_PLUGIN_DIRS` in `~/.claude/settings.json`), entferne den Eintrag, sonst läuft das Mod doppelt.
+If you also load a mod as a folder under `~/.claude/mods/` (`CLAUDE_CODE_PLUGIN_DIRS` in `~/.claude/settings.json`), remove that entry, or the mod runs twice.
 
-### Claude die Pfade richtig schreiben lassen
+### Let Claude write the paths in full
 
-Die Buttons erscheinen nur für Pfade, die Claude vollständig schreibt. Füge dazu diesen Abschnitt in `~/.claude/CLAUDE.md` ein (die Datei gilt für alle Projekte; gibt es sie nicht, lege sie an):
+Buttons appear for absolute paths, and for relative paths that start with a folder of the project. To get them reliably, add this to `~/.claude/CLAUDE.md` (it applies to all projects; create the file if there is none):
 
 ```markdown
-## Pfade in Chat-Antworten als path-buttons
+## Paths in replies as path-buttons
 
-Der Mod `path-buttons` macht aus Pfaden in Antworten bunte Buttons, erkennt aber nur vollständige Pfade mit Laufwerksbuchstaben.
+The `path-buttons` mod turns paths in replies into coloured buttons.
 
-- Jede Datei und jeden Ordner als absoluten Windows-Pfad in Backticks schreiben, z. B. `C:\Projekte\beispiel\datei.png`.
-- Keine relativen Pfade und keine Markdown-Links auf lokale Dateien.
-- Höchstens 7 Pfade pro Antwort (der Mod hat 7 Farben), die wichtigsten zuerst.
+- Write every file and folder as an absolute path in backticks, e.g. `C:\Projects\example\file.png` or `/Users/me/Projects/example/file.png`.
+- No markdown links to local files.
+- At most 7 paths per reply (the mod has 7 colours), the most important first.
 ```
-
-Bei neuen Projekten muss nichts eingetragen werden: Der Hauptordner eines Projekts (der Ordner, in dem die Claude-Sitzung läuft) gilt automatisch als Basis für relative Pfade. Ein kurzer Pfad wie `docs\notizen.md` wird in jedem Projekt im jeweiligen Hauptordner gesucht, sobald `docs` unter [Relative Pfade](#relative-pfade-optional) als Ordner genannt ist.
 
 ## path-buttons
 
-Jeder Pfad bekommt ein farbiges Zeichen. Dasselbe Zeichen steht im Antworttext vor dem Pfad und auf seinem Button, so ist klar, welcher Button zu welchem Pfad gehört. Die Form zeigt die Art:
+Every path gets a coloured mark. The same mark stands before the path in the reply and on its button, so it is clear which button belongs to which path. The shape tells the kind:
 
-| Art | Zeichen |
+| Kind | Mark in the text |
 | --- | --- |
-| Video | Herz ❤️🧡💚💙💛💜🤍 |
-| Bild | Quadrat 🟥🟧🟩🟦🟨🟪⬜ |
-| alles andere (Ordner, Text, sonstige Dateien) | Kreis 🔴🟠🟢🔵🟡🟣⚪ |
+| Video | heart ❤️🧡💚💙💛💜🤍 |
+| Image | square 🟥🟧🟩🟦🟨🟪⬜ |
+| everything else | dot 🔴🟠🟢🔵🟡🟣⚪ |
 
-Im Text steht nur der Dateiname (bei Ordnern mit dem übergeordneten Ordner), der Button behält den vollen Pfad. In Codeblöcken stehen die Zeichen in einer Zeile darüber, damit der Copy-Button nur den reinen Pfad kopiert.
+The text shows only the file name (a folder with its parent folder), the button keeps the full path. In code blocks the marks stand on a line above, so the copy button copies the bare path.
 
-| Pfad | Öffnet in |
+The buttons show the paths of the latest replies, newest on the left, at most seven. While a choice box is open they stand on a row above it.
+
+In the band:
+- **Images and videos** show as a small, pale black-and-white preview with rounded corners and a bar in their colour at top and bottom. Videos show their frame at one second. The preview is made by `ffmpeg` (looked for in `Program Files\ffmpeg\bin` on Windows, in `/opt/homebrew/bin`, `/usr/local/bin` and `/usr/bin` elsewhere, else on the PATH) as a small JPEG in the temp folder. Without ffmpeg, or until the preview is ready, a symbol stands in.
+- **Symbols** in the path's colour: Blender logo (`.blend`), spiral (Houdini `.hip`, `.hda`, `.otl`), `>` (Python and scripts: `.py`, `.ps1`, `.sh`, `.bat`, `.js`, `.ts`, `.tsx`), tree slice (`.log`), gear (data and settings: `.json`, `.yaml`, `.xml`, `.ini`, `.ocio`), cube (3D: `.usd`, `.glb`, `.fbx`, `.obj`, `.abc`), page (`.pdf`), network in a disc (models: `.safetensors`, `.ckpt`, `.pt`, `.gguf`, `.onnx`), two lines (`.md`, `.txt`), folder, film reel (video, until its preview is ready). Other files keep their dot.
+- **Left click** opens the path, **right click** copies the full path to the clipboard ("Path copied" shows for a moment).
+- **Hovering** shows the file name dimmed on the left of the band.
+
+| Path | Opens in |
 | --- | --- |
-| Ordner | Directory Opus (springt zum Ordner, holt das Fenster nach vorn); ohne Opus im Windows Explorer |
-| Bild oder Video (png, jpg, webp, bmp, gif, tif, exr, hdr, tga, dpx, mp4, mov, mkv, avi, webm, m4v, mxf) | Chaos Player; ohne ihn in der Standard-App |
-| `.md`, `.txt` | Sidepanel in Claude, Markdown gerendert |
-| alles andere | Standard-App von Windows |
+| Folder | Directory Opus where installed (Windows: jumps to the folder and brings the window forward), else the system's file manager |
+| Image or video (png, jpg, webp, bmp, gif, tif, exr, hdr, tga, dpx, mp4, mov, mkv, avi, webm, m4v, mxf) | Chaos Player where installed (Windows), else the default app |
+| `.md`, `.txt` | a pane in Claude, markdown rendered |
+| everything else | the system's default app (`explorer` on Windows, `open` on macOS, `xdg-open` on Linux) |
 
-Directory Opus und der Chaos Player werden in den Program-Files-Ordnern der Maschine gesucht, es ist nichts fest eingetragen. Sind sie nicht installiert, greift die Standard-App.
+### Settings
 
-Die Buttons zeigen die Pfade der letzten Antworten, die neuesten links, höchstens sieben. Ist eine Auswahlbox offen, stehen sie in einer Zeile darüber.
+`/path-buttons` opens the settings pane:
+- **Programs** for folders and for images and videos: the full path of a program (on macOS an `.app` works too). Empty means automatic, as in the table above.
+- **Previews** of images and videos on or off.
+- **Symbols** for file types on or off (off: dots only).
 
-In der Leiste:
-- **Bilder und Videos** erscheinen als kleines, helles Schwarz-Weiß-Vorschaubild mit abgerundeten Ecken und einem Balken in der Farbe ihres Symbols oben und unten. Videos zeigen das Bild bei Sekunde 1. Die Vorschau erzeugt `ffmpeg` (gesucht unter `Program Files\ffmpeg\bin`, sonst im PATH) als kleines JPEG im Temp-Ordner. Ohne ffmpeg, oder bis die Vorschau fertig ist, steht das Symbol da.
-- **Eigene Symbole** in der Farbe ihres Pfads: Blender-Logo (`.blend`), Spirale (Houdini `.hip`, `.hda`, `.otl`), `>` (Python und Skripte: `.py`, `.ps1`, `.sh`, `.bat`, `.js`, `.ts`, `.tsx`), Baumscheibe (`.log`), Zahnrad (Daten und Konfiguration: `.json`, `.yaml`, `.xml`, `.ini`, `.ocio`), Y in Scheibe (3D: `.usd`, `.glb`, `.fbx`, `.obj`, `.abc`), Blatt (`.pdf`), Netz in Scheibe (Modelle: `.safetensors`, `.ckpt`, `.pt`, `.gguf`, `.onnx`), zwei Striche (`.md`, `.txt`), Ordner, Filmrolle (Video, bis die Vorschau da ist). Im Text bleibt der farbige Punkt.
-- Seit Claude Code 2.1.325 bekommt jedes Mod eine eigene Zeile in der Leiste; `handoff-button` legt die Zeilen wieder nebeneinander.
-- **Linksklick** öffnet den Pfad, **Rechtsklick** kopiert den vollen Pfad in die Zwischenablage (kurz erscheint „Pfad kopiert“).
-- **Überfahren** zeigt den Dateinamen gedämpft links in der Leiste.
+The settings are kept across sessions.
 
-### Relative Pfade (optional)
+### Relative paths
 
-Ohne Einstellung erkennt das Mod nur absolute Pfade. Soll es auch kurze Pfade wie `blender\shot01\frame.png` erkennen, nenne die ersten Ordner, ab denen das gilt. Sie werden dann im Projektordner der Sitzung gesucht. In `~/.claude/settings.json`:
+Relative paths like `blender/shot01/frame.png` are found without any setup when their first folder lies directly in the session's project folder. The mod reads the project's folders for this (again when the project changes and every 30 seconds). Words with a slash that do not start with a project folder stay plain text.
+
+Short names for deeper folders can be set optionally, in `~/.claude/settings.json` or under `/config` in Claude:
 
 ```json
 "pluginConfigs": {
   "path-buttons@path-buttons": {
     "options": {
-      "relativeFolders": "blender, renders, docs",
       "aliases": "shot01=blender/shots/shot01"
     }
   }
 }
 ```
 
-- `relativeFolders`: erste Ordner, durch Komma getrennt.
-- `aliases`: Kurzname=Ordner im Projekt, durch Semikolon getrennt. `shot01\frame.png` öffnet dann `<Projekt>\blender\shots\shot01\frame.png`.
+`shot01/frame.png` then opens `<project>/blender/shots/shot01/frame.png`.
 
-Die beiden Felder lassen sich auch in Claude unter `/config` setzen.
-
-Hinweise:
-- Nur Windows, Pfade mit Laufwerksbuchstaben (`C:\...`, `P:/...`). Pfade mit Leerzeichen werden nur in Backticks erkannt.
-- Zum Nach-vorn-Holen von Directory Opus wird kurz ein PowerShell-Skript in den Temp-Ordner geschrieben (`path-buttons-focus-opus.ps1`).
+Notes:
+- Paths are found as `C:\...` or `C:/...` (Windows), `/Users/...`, `/home/...`, `/Volumes/...`, `/mnt/...` and other usual top folders, and `~/...`. In backticks any absolute path counts. Paths with spaces are found only in backticks.
+- To bring Directory Opus forward, a small PowerShell script is written to the temp folder (`path-buttons-focus-opus.ps1`).
 
 ## handoff-button
 
-Vier Buttons rechts in der Leiste über dem Prompt. Beim Überfahren steht links in der Leiste ein kurzer Hinweis, was der Button tut.
+Four buttons on the right of the band above the prompt. Hovering shows a short hint on the left of the band.
 
-| Button | Was er tut |
+| Button | What it does |
 | --- | --- |
-| `⌾` | führt sofort `/advisor opus` aus |
-| `C` | führt sofort `/compact` aus, ohne Nachfrage |
-| `H` | schickt „Bitte schreib ein Handover.“, als hättest du es getippt |
-| `⤓` | das volle Handover, siehe unten |
+| `⌾` | runs `/advisor opus` at once |
+| `C` | runs `/compact` at once, without asking |
+| `H` | sends "Bitte schreib ein Handover." as if you had typed it |
+| `⤓` | the full handover, see below |
 
-Der `⤓`-Button:
-1. exportiert den Chat als `.txt` und `.pdf` nach `Dokumente\Claude Handoffs`,
-2. lässt eine Übergabe schreiben,
-3. benennt den Chat `… [A]`, leert ihn und startet ihn als `… [B]` mit der Übergabe,
-4. zeigt im neuen Chat einen `<<`-Button, der das PDF des alten Chats öffnet.
+The `⤓` button:
+1. exports the chat as `.txt` and `.pdf` to `Documents\Claude Handoffs`,
+2. has a handover written,
+3. renames the chat `… [A]`, clears it and starts it as `… [B]` with the handover,
+4. shows a `<<` button in the new chat that opens the old chat's PDF.
 
-Läuft gerade eine Antwort, wartet `H`, bis sie fertig ist. Geht `C` nicht, erscheint eine kurze Meldung.
+While a reply runs, `H` waits until it is done. If `C` does not work, a short message appears.
 
-`/import-chat` lädt einen exportierten Chat in den aktuellen Chat. Das PDF wird mit Microsoft Edge im Hintergrund erzeugt. Ist Edge nicht zu finden, entfällt das PDF.
+`/import-chat` loads an exported chat into the current chat. The PDF is made by Microsoft Edge in the background; without Edge there is no PDF.
+
+Since Claude Code 2.1.325 every mod gets its own row in the band; `handoff-button` lays the rows side by side again.

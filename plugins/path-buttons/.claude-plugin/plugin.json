@@ -1,19 +1,15 @@
 {
   "name": "path-buttons",
-  "version": "0.6.1",
-  "description": "Farbige Buttons und Vorschaubilder über dem Prompt für die im Claude-Text genannten Pfade: Linksklick öffnet (Ordner in Directory Opus, Bilder und Videos im Chaos Player, .md/.txt im Sidepanel), Rechtsklick kopiert den Pfad, Überfahren zeigt den Dateinamen.",
-  "author": { "name": "gottesgerl" },
+  "version": "0.7.0",
+  "description": "Coloured buttons and previews above the prompt for the paths in Claude's replies: left click opens (folders, media and text in the app of your choice), right click copies the path, hover shows the file name. Windows, macOS, Linux. /path-buttons opens the settings.",
+  "author": {
+    "name": "gottesgerl"
+  },
   "userConfig": {
-    "relativeFolders": {
-      "type": "string",
-      "title": "Ordner für relative Pfade",
-      "description": "Erste Ordner, ab denen ein relativer Pfad (z. B. blender/shot/file.png) als Pfad im Projektordner zählt, durch Komma getrennt. Leer: nur absolute Pfade.",
-      "default": ""
-    },
     "aliases": {
       "type": "string",
-      "title": "Kurznamen für Ordner",
-      "description": "Kurzname=Ordner im Projekt, durch Semikolon getrennt, z. B. shot01=blender/shots/shot01",
+      "title": "Short names for folders",
+      "description": "Optional. name=folder in the project, separated by semicolons, e.g. shot01=blender/shots/shot01. Folders directly in the project are found without an entry.",
       "default": ""
     }
   }
