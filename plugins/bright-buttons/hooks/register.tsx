@@ -337,8 +337,8 @@ async function exportedChats($: Engine) {
 // context still free and runs its mode: compact, handover, or handover with log and clear (a right
 // click shows the modes and the compact-when-idle switch). The ids 'compact' and 'handover' stay
 // those of the cache and the context button, as the stored settings name them.
-type ButtonId = 'back' | 'advisor' | 'compact' | 'handover' | 'yes' | 'idle'
-const BUTTONS: readonly string[] = ['back', 'advisor', 'compact', 'handover', 'yes', 'idle']
+type ButtonId = 'back' | 'advisor' | 'custom' | 'compact' | 'handover' | 'yes' | 'idle'
+const BUTTONS: readonly string[] = ['back', 'advisor', 'custom', 'compact', 'handover', 'yes', 'idle']
 const MODELS = ['fable', 'opus', 'sonnet', 'haiku'] as const
 type Model = (typeof MODELS)[number]
 const MODEL_NAMES: Record<Model, string> = { fable: 'Fable', opus: 'Opus', sonnet: 'Sonnet', haiku: 'Haiku' }
@@ -442,6 +442,10 @@ function hintText(id: ButtonId) {
   if (id === 'compact') {
     return 'Cache' + (minutesShown > 0 ? ' · ' + minutesShown + ' min' : isExpiredShown ? ' · expired' : '') +
       (isAutoRenew ? (renewCount > 0 ? ' · auto-renewed ' + renewCount + '×' : ' · auto-renew on') : '')
+  }
+  if (id === 'custom') {
+    return (settings.customName.trim() || 'Custom button') + (isCustomStarting ? ' · starting…' : '') +
+      (settings.customOpen.trim() === '' && settings.customStart.trim() === '' ? ' · set it up in the settings' : '')
   }
   if (id === 'idle') {
     return 'Compact when idle: ' + cfg.idleMinutes + ' min, context ≥ ' + cfg.idlePercent + ' %'
@@ -760,6 +764,101 @@ function idleChanged($: Engine) {
   }
 }
 
+// The custom button: a field like the cache's with a symbol in hairlines (as thin as the ice lolly's),
+// picked in the settings. An orange dot while it starts something.
+const CUSTOM_ICONS = {
+  arrows: '<path d="M8 11H21.5M18.5 8L21.5 11L18.5 14"/><path d="M22 17H8.5M11.5 14L8.5 17L11.5 20"/>',
+  wind: '<path d="M6 12.4C9.5 10.4 12.5 10.9 15.5 12.1C18.5 13.3 21 12.7 21 10.1C21 8.1 18.4 7.7 18.2 9.5"/>' +
+    '<path d="M6 15.4C10 13.5 14 13.9 17.5 15.1C20.5 16.1 24 15.5 24 13.1C24 11.3 21.6 10.9 21.2 12.7"/>' +
+    '<path d="M6 18.4C9.5 16.7 13 16.7 16 17.7C18.4 18.5 18.8 21.3 17 21.7C15.4 22 14.8 20.3 15.6 19.5"/>',
+  leaf: '<path d="M15 23.5V9"/><path d="M15 9C13.7 7.5 13.7 5.4 15 3.9C16.3 5.4 16.3 7.5 15 9Z"/>' +
+    [12.6, 16.2, 19.8].map(y => '<path d="M15 ' + y + 'C12.9 ' + y + ' 11.1 ' + (y - 1.4) + ' 10.8 ' + (y - 3.4) + 'C12.9 ' + (y - 3.4) + ' 14.6 ' + (y - 2) + ' 15 ' + y + 'Z"/>' +
+      '<path d="M15 ' + y + 'C17.1 ' + y + ' 18.9 ' + (y - 1.4) + ' 19.2 ' + (y - 3.4) + 'C17.1 ' + (y - 3.4) + ' 15.4 ' + (y - 2) + ' 15 ' + y + 'Z"/>').join(''),
+  power: '<path d="M11.44 9.92A6.2 6.2 0 1 0 18.56 9.92"/><path d="M15 6.8V14"/>',
+  play: '<path d="M11.4 8.3C11.4 7.3 12.4 6.8 13.2 7.3L21.2 12.7C22 13.2 22 14.8 21.2 15.3L13.2 20.7C12.4 21.2 11.4 20.7 11.4 19.7Z"/>',
+} as const
+type CustomIcon = keyof typeof CUSTOM_ICONS
+const CUSTOM_ICON_NAMES: Record<CustomIcon, string> = { arrows: 'Arrows', wind: 'Wind', leaf: 'Sprig', power: 'Power', play: 'Play' }
+const CUSTOM_ICON_LIST = Object.keys(CUSTOM_ICONS) as CustomIcon[]
+function customField(icon: CustomIcon, isStarting: boolean) {
+  const symbol = '<g fill="none" stroke="' + C_LETTER_GREY + '" stroke-width="0.77" stroke-linecap="round" stroke-linejoin="round">' +
+    (CUSTOM_ICONS[icon] ?? CUSTOM_ICONS.play) + '</g>'
+  return fieldOf('customfield', 0, symbol, false).replace('</svg>',
+    isStarting ? '<circle cx="' + (C_FIELD_W - 4.6) + '" cy="4.6" r="2.7" fill="#f08c00" stroke="#fff" stroke-width="0.8"/></svg>' : '</svg>')
+}
+const customIcon = (): CustomIcon => (CUSTOM_ICON_LIST.includes(settings.customIcon) ? settings.customIcon : 'play')
+
+// A click on the custom button: when "Opens" is a web address that does not answer and "Starts" is
+// set, it starts that first (hidden, not a child of this call) and waits for the address; then it
+// opens the address, file or folder. Nothing set: the settings.
+let isCustomStarting = false
+const CUSTOM_WAIT_MS = 40000
+const pause = ($: Engine, ms: number) => new Promise<void>(done => { $.clock.after(ms, () => done()) })
+async function answers($: Engine, url: string) {
+  try {
+    const response = await $.http.fetch(url)
+    return response.status > 0
+  } catch {
+    return false
+  }
+}
+async function startDetached($: Engine, line: string) {
+  const bare = line.replace(/^"(.*)"$/, '$1')
+  if (platform === 'windows') {
+    const quote = (text: string) => "'" + text.replace(/'/g, "''") + "'"
+    const isFile = !bare.includes('"') && (await $.fs.exists(bare))
+    const script = isFile
+      ? 'Start-Process -FilePath ' + quote(bare) + ' -WindowStyle Hidden'
+      : 'Start-Process -FilePath cmd.exe -ArgumentList ' + quote('/c ' + line) + ' -WindowStyle Hidden'
+    return $.process.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', script], { timeoutMs: 15000 })
+  }
+  return $.process.run(['sh', '-c', 'nohup sh -c "$0" >/dev/null 2>&1 &', line], { timeoutMs: 15000 })
+}
+async function runCustom($: Engine) {
+  const target = settings.customOpen.trim()
+  const start = settings.customStart.trim()
+  if (target === '' && start === '') {
+    await openSettings($)
+    return
+  }
+  if (isCustomStarting) {
+    return
+  }
+  await resolvePlatform($)
+  const isUrl = /^https?:\/\//i.test(target)
+  if (start !== '' && !(isUrl && (await answers($, target)))) {
+    isCustomStarting = true
+    $.ui.invalidate('ui.render')
+    try {
+      const ran = await startDetached($, start)
+      await log($, 'custom start: exit ' + ran.exitCode + ' ' + ran.stderr.slice(0, 200))
+      if (isUrl) {
+        const until = (await $.clock.now()) + CUSTOM_WAIT_MS
+        while (!(await answers($, target)) && (await $.clock.now()) < until) {
+          await pause($, 1000)
+        }
+      }
+    } catch (error) {
+      $.ui.toast('Start ging nicht: ' + String(error).slice(0, 200))
+    } finally {
+      isCustomStarting = false
+      $.ui.invalidate('ui.render')
+    }
+  }
+  if (target === '') {
+    return
+  }
+  try {
+    if (isUrl) {
+      await $.process.run(platform === 'windows' ? ['rundll32.exe', 'url.dll,FileProtocolHandler', target] : platform === 'mac' ? ['open', target] : ['xdg-open', target])
+    } else {
+      await open($, target)
+    }
+  } catch (error) {
+    $.ui.toast('Could not open: ' + String(error).slice(0, 150))
+  }
+}
+
 // One of the band's buttons. Each keeps its look (a drawing where it has one); an invisible region
 // of hover.tsx over it shows a dim hint while the pointer is on it and runs the action on a click.
 // Without regions, plain buttons.
@@ -807,8 +906,8 @@ async function rightClick($: Engine, id: ButtonId) {
   } else if (id === 'handover') {
     isContextMenu = !isContextMenu
     isPicking = false
-  } else if (id === 'yes') {
-    // A right click on the thumb opens the settings.
+  } else if (id === 'yes' || id === 'custom') {
+    // A right click on the thumb or the custom button opens the settings.
     void openSettings($)
   }
   $.ui.invalidate('ui.render')
@@ -825,6 +924,8 @@ async function pressButton($: Engine, id: ButtonId) {
     await renewNow($)
   } else if (id === 'idle') {
     await toggleIdleCompact($)
+  } else if (id === 'custom') {
+    await runCustom($)
   } else if (id === 'yes') {
     await sayYes($)
   } else if (contextMode === 'compact') {
@@ -917,6 +1018,8 @@ async function handoffBand($: Engine, e: any, ui: any, middle: any) {
         }} />
       ))}
       {cfg.advisor && !isContextMenu && button('advisor', '⌾')}
+      {!isMenu && settings.custom && buttonOf($, ui, 'custom', settings.customName.trim() || 'Custom',
+        customField(customIcon(), isCustomStarting), false, C_FIELD_W, C_FIELD_H)}
       {!isMenu && cfg.compact && buttonOf($, ui, 'compact', 'Cache', cacheField(minutesLeft, isAutoRenew, isExpired), false, C_FIELD_W, C_FIELD_H)}
       {/* After a right click on the context button: its modes, the chosen one at full strength, and the
           compact-when-idle switch. */}
@@ -1236,11 +1339,19 @@ type Settings = {
   // The thumb's own text per language; before 0.14 one text for all (thumbText).
   thumbTexts: Partial<Record<Language, string>>
   thumbText?: string
+  // The custom button: its name (the hint), its symbol, what it opens (a web address, file or folder)
+  // and what it starts when the address does not answer.
+  custom: boolean
+  customName: string
+  customIcon: CustomIcon
+  customOpen: string
+  customStart: string
 }
 const DEFAULTS: Settings = {
   folderApp: '', mediaApp: '', threeDApp: '', previews: true, symbols: true, textRoom: 10,
   thumb: true, advisor: false, compact: true, handover: true,
   idleMinutes: 55, idlePercent: 50, cacheMinutes: 60, renewLead: 1, renewMax: 2, language: 'en', advisorModel: 'opus', thumbTexts: {},
+  custom: false, customName: '', customIcon: 'play', customOpen: '', customStart: '',
 }
 let settings: Settings = { ...DEFAULTS }
 let isSettingsLoaded = false
@@ -1528,7 +1639,7 @@ const ICON_DRAWN = 22
 // The room kept at the band's left for the hovered file name (columns), so it never gets squeezed
 // out: settings.textRoom.
 // Columns kept for ⌾, C and H right of the paths: about 8 each, the gaps besides.
-const othersRoom = () => 6 + 8 * [settings.advisor, settings.compact, settings.handover].filter(Boolean).length
+const othersRoom = () => 6 + 8 * [settings.advisor, settings.custom, settings.compact, settings.handover].filter(Boolean).length
 // The columns the thumb takes at the band's left end, with its gap.
 const THUMB_ROOM = 6
 // Where the estimates fall short, the name gives way, down to this many columns.
@@ -1799,10 +1910,11 @@ async function readClaude($: Engine) {
 // The settings pane, kept small: a switch per option (each its own colour), the explanations behind a
 // small (i) that shows them while the pointer is on it (a click keeps one open), the timings below a line.
 let isChoosingLanguage = false
-type Toggle = 'thumb' | 'advisor' | 'compact' | 'handover' | 'previews' | 'symbols'
-const TOGGLES: readonly Toggle[] = ['thumb', 'advisor', 'compact', 'handover', 'previews', 'symbols']
+let isChoosingIcon = false
+type Toggle = 'thumb' | 'advisor' | 'custom' | 'compact' | 'handover' | 'previews' | 'symbols'
+const TOGGLES: readonly Toggle[] = ['thumb', 'advisor', 'custom', 'compact', 'handover', 'previews', 'symbols']
 const TOGGLE_COLOURS: Record<Toggle, string> = {
-  thumb: '#f5a524', advisor: '#8e4ec6', compact: '#3e7bd6', handover: '#30a46c', previews: '#12a594', symbols: '#e54666',
+  thumb: '#f5a524', advisor: '#8e4ec6', custom: '#d6409f', compact: '#3e7bd6', handover: '#30a46c', previews: '#12a594', symbols: '#e54666',
 }
 const INFO = {
   programs: 'The full path of a program, or the name of one found on this computer; Enter saves. Empty: the system\'s default app. Markdown and text files open in a pane of this chat.',
@@ -1813,6 +1925,7 @@ const INFO = {
   advisor: '⌾ runs /advisor. The model here is the one of new chats; a right click on ⌾ changes it for one chat.',
   compact: 'The cache button: its grey field is the prompt cache\'s time left, pale with zz once it has run out. A click renews the cache now; a right click turns auto-renew on or off for this chat (a red dot).',
   handover: 'The context button: its grey field is the context still free; the symbol turns green at 20 %, blue at 33 %, orange at 50 %, red at 75 %. A click runs its mode; a right click shows the modes (Compact, Handover, Handover, Log & Clear) and the switch for compact when idle (a red dot).',
+  custom: 'A button of your own between ⌾ and the cache. A click opens what "Opens" names: a web address, a file or a folder. When the address does not answer and "Starts if needed" names a command or a .cmd/.bat/.sh file, that runs first, hidden, and the button waits for the address (up to 40 s, an orange dot meanwhile). The symbol is picked from a list. A right click on the button opens these settings.',
   idle: 'Compact when idle: after a reply, with nothing new for these minutes, the chat is compacted if at least this much of its context is used. On or off per chat, with a right click on the context button.',
   cache: 'How long the prompt cache holds after a reply. This only sets the display and auto-renew; it does not change Claude\'s prompt cache.',
   claude: 'Fills in what Claude\'s own settings hold: the advisor model and the language. Mods cannot read the cache time.',
@@ -1846,6 +1959,17 @@ function settingsMessage($: Engine, data: { action?: string; id?: string } | und
     const key = id.slice(4) as Toggle
     if (data?.action === 'press' && TOGGLES.includes(key)) {
       $.clock.after(0, () => void saveSettings($, { [key]: !settings[key] }))
+    }
+    return true
+  }
+  if (id.startsWith('icon:')) {
+    const icon = id.slice(5) as CustomIcon
+    if (data?.action === 'press' && CUSTOM_ICON_LIST.includes(icon)) {
+      isChoosingIcon = false
+      $.clock.after(0, () => void saveSettings($, { customIcon: icon }))
+    } else if (data?.action === 'press' && icon === ('open' as string)) {
+      isChoosingIcon = !isChoosingIcon
+      $.ui.invalidate('ui.render')
     }
     return true
   }
@@ -1941,6 +2065,44 @@ function settingsPane($: Engine, ui: any, found: string[]) {
       {infoText(['previews', 'symbols'])}
       {row('buttons', toggle('advisor', 'Advisor'), toggle('compact', 'Cache'), toggle('handover', 'Context window'))}
       {infoText(['advisor', 'compact', 'handover'])}
+      {row('custom', toggle('custom', 'Custom'),
+        settings.custom && words('custom-name', 'named'),
+        settings.custom && (
+          <Box key="box-customName" width={22} flexShrink={0}>
+            <Input key="customName" value={settings.customName} placeholder="Flowchart" submitLabel="✓"
+              onSubmit={(value: string) => void saveSettings($, { customName: value.trim() })} />
+          </Box>
+        ),
+        settings.custom && words('custom-symbol', 'symbol'),
+        settings.custom && isDrawn && region('icon:open', customField(customIcon(), false), CUSTOM_ICON_NAMES[customIcon()], 19, 18),
+        settings.custom && (
+          <Button key="icon-open" plain dimColor label={(isDrawn ? '' : CUSTOM_ICON_NAMES[customIcon()] + ' ') + (isChoosingIcon ? '▴' : '▾')} onPress={() => {
+            isChoosingIcon = !isChoosingIcon
+            $.ui.invalidate('ui.render')
+          }} />
+        ))}
+      {settings.custom && isChoosingIcon && (
+        <Box key="icons" flexDirection="row" flexWrap="wrap" gap="md" marginLeft="md">
+          {CUSTOM_ICON_LIST.map(icon => (
+            <Box key={'icon-' + icon} flexDirection="row" alignItems="center" gap="xs">
+              {isDrawn && region('icon:' + icon, customField(icon, false), CUSTOM_ICON_NAMES[icon], 25, 24)}
+              <Button key={'pick-icon-' + icon} plain dimColor={icon !== customIcon()} label={CUSTOM_ICON_NAMES[icon]} onPress={() => {
+                isChoosingIcon = false
+                $.clock.after(0, () => void saveSettings($, { customIcon: icon }))
+              }} />
+            </Box>
+          ))}
+        </Box>
+      )}
+      {settings.custom && row('customOpen',
+        <Box key="label-customOpen" width={18} flexShrink={0}><Text dimColor>Opens</Text></Box>,
+        <Input key="customOpen" value={settings.customOpen} placeholder="http://localhost:8791 or a path" submitLabel="save"
+          onSubmit={(value: string) => void saveSettings($, { customOpen: value.trim() })} />)}
+      {settings.custom && row('customStart',
+        <Box key="label-customStart" width={18} flexShrink={0}><Text dimColor>Starts if needed</Text></Box>,
+        <Input key="customStart" value={settings.customStart} placeholder="a command or a .cmd file (optional)" submitLabel="save"
+          onSubmit={(value: string) => void saveSettings($, { customStart: value.trim() })} />)}
+      {infoText(['custom'])}
       {settings.advisor && row('advisor-models', words('advisor-model', 'Default:'),
         ...MODELS.map(model => (
           <Button key={'advisor-' + model} plain dimColor={model !== settings.advisorModel} label={MODEL_NAMES[model]} onPress={() => {

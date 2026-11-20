@@ -4,9 +4,9 @@ A band above the prompt for Claude Code (desktop app and terminal):
 
 - a coloured button per path from the latest replies, a small preview for images and videos; left click opens, right click copies the path (Windows, macOS and Linux),
 - a thumb at the band's left end that types "Yes, please",
-- `⌾` for `/advisor`, a cache button (an ice lolly) with the prompt cache's time filling it and an auto-renew that keeps the cache alive, and a context button with the free context filling it that compacts or asks for a handover (Windows for the full handover).
+- `⌾` for `/advisor`, a custom button of your own that opens an address, file or folder and starts a server first when needed, a cache button (an ice lolly) with the prompt cache's time filling it and an auto-renew that keeps the cache alive, and a context button with the free context filling it that compacts or asks for a handover (Windows for the full handover).
 
-Each of the thumb, `⌾`, the cache and the context button can be switched off in the settings. Until version 0.10 the buttons on the right were a mod of their own, `handoff-button`; it is now part of `bright-buttons`.
+Each of the thumb, `⌾`, the custom, the cache and the context button can be switched off in the settings. Until version 0.10 the buttons on the right were a mod of their own, `handoff-button`; it is now part of `bright-buttons`.
 
 ## Installation
 
@@ -81,6 +81,7 @@ In the band:
 - **Buttons**, in three rows:
   - **Previews** of images and videos and **File symbols** (off: dots only), both on at first.
   - **Advisor** (off at first) with **Default:**, the advisor model of new chats (Opus); **Cache** and **Context window** (on).
+  - **Custom** (off at first): its name (the hint), its symbol picked from a list (Play at first; Arrows, Wind, Sprig, Power), **Opens** (a web address, a file or a folder) and **Starts if needed** (a command or a `.cmd`, `.bat` or `.sh` file).
   - **Thumb** (on), **sends** a text of your own per language (empty: "Yes, please" in that language), and the **language**, a list with small flags: English, Español, 中文, Français, Українська, 日本語, 한국어, Deutsch.
 - **Timings**:
   - **Auto-Compact** after 55 idle minutes, if 50 % of the context is used.
@@ -97,13 +98,14 @@ Notes:
 - Paths are found as `C:\...` or `C:/...` (Windows), `/Users/...`, `/home/...`, `/Volumes/...`, `/mnt/...` and other usual top folders, and `~/...`. In backticks any absolute path counts. Paths with spaces are found only in backticks.
 - To bring Directory Opus forward, a small PowerShell script is written to the temp folder (`bright-buttons-focus-opus.ps1`).
 
-## Thumb, ⌾, cache and context
+## Thumb, ⌾, custom, cache and context
 
-Three buttons on the right of the band and a thumb at its left end. Hovering shows a short hint right of the thumb, where a hovered file name shows too. A right click sets each button's option.
+Four buttons on the right of the band and a thumb at its left end. Hovering shows a short hint right of the thumb, where a hovered file name shows too. A right click sets each button's option.
 
 | Button | Left click | Right click |
 | --- | --- | --- |
 | `⌾` | runs `/advisor` with the chosen model (the settings' default at first) | shows `Fable Opus Sonnet Haiku` in the band, the other buttons out of the way; a pick turns the advisor on with that model for this chat |
+| custom (Play, or the symbol picked) | opens what **Opens** names. When that is a web address that does not answer and **Starts if needed** is set, it runs that first, hidden and on its own (not tied to Claude), and waits up to 40 seconds for the address, an orange dot on the button meanwhile. Example: `http://localhost:8791` with the `.cmd` that starts its local server. Nothing set: the settings open | opens the settings |
 | cache (ice lolly) | renews the prompt cache now with a short message from the mod ("Cache keep-alive, nothing to do. Reply with just: ok") | turns **auto-renew** on or off for this chat, shown as a red dot at the top right: shortly before the cache clock runs out the same message keeps the cache alive, each costing a cache read and a short reply. The grey field is an abstract hourglass: the cache time still left fills it from the bottom (the hint names the minutes). Once the time is up the symbol turns pale with a small `zz`: the cache sleeps |
 | context (`C`, `H` or `⤓`) | runs its mode: `C` runs `/compact` at once; `H` sends "Bitte schreib ein Handover." as if you had typed it; `⤓` is the full handover (Windows) | shows the three modes in the band, **Compact**, **Handover** and **Handover, Log & Clear**, and a switch for **compact when idle** (a red dot on the button): after a reply, with nothing new typed for the minutes set, the chat is compacted if enough of its context is used. The grey field shows the context still free, sinking from the top as the chat grows; the letter turns green from 20 % context, blue from 33 %, orange from 50 % and red from 75 % (the hint names the percent) |
 | thumb | sends its text in the chosen language, as if you had typed it | opens the settings |
