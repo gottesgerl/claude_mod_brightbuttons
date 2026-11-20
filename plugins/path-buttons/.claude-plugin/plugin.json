@@ -1,16 +1,8 @@
 {
   "name": "path-buttons",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Coloured buttons and previews above the prompt for the paths in Claude's replies: left click opens (folders, media and text in the app of your choice), right click copies the path, hover shows the file name. Windows, macOS, Linux. /path-buttons opens the settings.",
   "author": {
     "name": "gottesgerl"
-  },
-  "userConfig": {
-    "aliases": {
-      "type": "string",
-      "title": "Short names for folders",
-      "description": "Optional. name=folder in the project, separated by semicolons, e.g. shot01=blender/shots/shot01. Folders directly in the project are found without an entry.",
-      "default": ""
-    }
   }
 }

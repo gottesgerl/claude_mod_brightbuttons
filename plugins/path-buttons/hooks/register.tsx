@@ -14,37 +14,18 @@ const PATH =
 
 // Short relative paths (`blender\shot\...`) resolve against the session's project folder (base).
 // A relative path only counts when its first folder is a folder at the top of the project (read
-// from disk, nothing to set up) or an alias, so ordinary words with a slash do not turn into buttons.
-// An alias stands for a deeper folder (optional `aliases` option: `name=folder\sub; name2=other`).
+// from disk, nothing to set up), so ordinary words with a slash do not turn into buttons.
 let base = ''
 let home = ''
-let ALIASES: Record<string, string> = {}
 let topFolders: string[] = []
 let topFoldersOf = ''
 let topFoldersAt = 0
-// Matches nothing until a project folder or an alias is known.
+// Matches nothing until a project folder is known.
 let REL = /(?!)()()/g
 
-const listOf = (value: unknown) =>
-  String(value ?? '')
-    .split(/[,;]/)
-    .map(part => part.trim())
-    .filter(part => part !== '')
-
-function configure(options: Readonly<Record<string, unknown>>) {
-  ALIASES = {}
-  for (const pair of listOf(options.aliases)) {
-    const [name = '', target = ''] = pair.split('=').map(part => part.trim())
-    if (name !== '' && target !== '') {
-      ALIASES[name] = target.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
-    }
-  }
-  buildRelative()
-}
-
-// The pattern for relative paths: the project's top folders and the aliases as first part.
+// The pattern for relative paths: one of the project's top folders as first part.
 function buildRelative() {
-  const roots = [...topFolders, ...Object.keys(ALIASES)]
+  const roots = topFolders
   if (roots.length === 0) {
     REL = /(?!)()()/g
     return
@@ -93,7 +74,7 @@ function dotFor(path: string) {
 
 const markFor = dotFor
 
-// A cleaned path as an absolute one: relative paths get the project folder (and their alias) in front.
+// A cleaned path as an absolute one: relative paths get the project folder in front.
 function absolute(raw: string) {
   const path = clean(raw)
   if (/^[A-Za-z]:[\\/]/.test(path)) {
@@ -108,11 +89,8 @@ function absolute(raw: string) {
   if (base === '') {
     return ''
   }
-  const [first = '', ...rest] = partsOf(path)
-  const alias = Object.keys(ALIASES).find(key => key.toLowerCase() === first.toLowerCase())
-  const parts = alias === undefined ? [first, ...rest] : [...partsOf(ALIASES[alias] ?? ''), ...rest]
   const sep = sepOf(base)
-  return base + sep + parts.join(sep)
+  return base + sep + partsOf(path).join(sep)
 }
 
 // The project folder of the session, so relative paths open in the project the chat runs in.
@@ -394,6 +372,28 @@ const FRAMES = ['#e0303a', '#f5821f', '#3cb44b', '#3a78d8', '#f2c40f', '#8e44ad'
 
 // Flat symbols for the band in the path's colour, on a 24 x 24 grid; holes are cut, so any background shows through.
 const ICON_DRAWN = 22
+// The room kept at the band's left for the hovered file name (columns), so it never gets squeezed out.
+const TEXT_ROOM = 18
+// Columns kept for what other mods put in the band beside the paths (handoff-button's four buttons).
+const OTHERS_ROOM = 30
+// Where the estimates fall short, the name gives way, down to this many columns.
+const NAME_LEAST = 8
+// About how many pixels a column of the band is wide in the desktop app.
+const COLUMN_PIXELS = 9
+// About how many columns a path takes in the band: a preview its width, a symbol or dot about three.
+function columnsOf(path: string) {
+  const thumb = settings.previews && MEDIA.test(path) ? thumbs.get(path.toLowerCase()) : undefined
+  if (thumb === undefined) {
+    return 3
+  }
+  const width = (THUMB_DRAWN * thumb.width) / Math.max(1, thumb.height)
+  return Math.ceil((width + 6) / COLUMN_PIXELS)
+}
+// A grey open hand, shown while the band shows older paths.
+const HAND =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">' +
+  '<path fill="none" stroke="#9a9a9a" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round" ' +
+  'd="M7.6 21.4 C6.2 20.2 5.2 18.4 4.6 16.6 L2.7 12.9 A1.25 1.25 0 0 1 4.9 11.7 L6.7 14.3 V6.2 A1.2 1.2 0 0 1 9.1 6.2 V11.2 V4.4 A1.2 1.2 0 0 1 11.5 4.4 V11.2 V5.2 A1.2 1.2 0 0 1 13.9 5.2 V11.6 V7.6 A1.2 1.2 0 0 1 16.3 7.6 V14.8 C16.3 18.6 14.6 21.4 11.6 21.4 Z"/></svg>'
 // A disc in the colour with a sign cut out of it, so the background shows through the sign.
 const disc = (colour: string, cut: string) =>
   `<mask id="cut"><rect width="24" height="24" fill="#fff"/><g fill="#000" stroke="#000">${cut}</g></mask>` +
@@ -445,11 +445,12 @@ const ICONS: { test: (path: string) => boolean; draw: (colour: string) => string
       `<rect x="10.55" y="5.0" width="2.9" height="2.2" rx="0.6" transform="rotate(0 12 12.5)"/><rect x="10.55" y="5.0" width="2.9" height="2.2" rx="0.6" transform="rotate(45 12 12.5)"/><rect x="10.55" y="5.0" width="2.9" height="2.2" rx="0.6" transform="rotate(90 12 12.5)"/><rect x="10.55" y="5.0" width="2.9" height="2.2" rx="0.6" transform="rotate(135 12 12.5)"/><rect x="10.55" y="5.0" width="2.9" height="2.2" rx="0.6" transform="rotate(180 12 12.5)"/><rect x="10.55" y="5.0" width="2.9" height="2.2" rx="0.6" transform="rotate(225 12 12.5)"/><rect x="10.55" y="5.0" width="2.9" height="2.2" rx="0.6" transform="rotate(270 12 12.5)"/><rect x="10.55" y="5.0" width="2.9" height="2.2" rx="0.6" transform="rotate(315 12 12.5)"/></g>`,
   },
   {
-    // A 3D exchange file (USD, glTF, FBX, OBJ, Alembic ...): a cube, its sides in two lighter shades.
+    // A 3D exchange file (USD, glTF, FBX, OBJ, Alembic ...): a wire cube, its visible edges.
     test: path => /\.(usd|usda|usdc|usdz|glb|gltf|fbx|obj|abc|ply|stl)$/i.test(path),
     draw: c =>
-      `<g fill="${c}"><path d="M12 4.2 L19.6 8.4 L12 12.6 L4.4 8.4 Z"/><path opacity="0.75" d="M4.2 9.6 L11.3 13.6 V21.6 L4.2 17.6 Z"/>` +
-      `<path opacity="0.5" d="M19.8 9.6 L12.7 13.6 V21.6 L19.8 17.6 Z"/></g>`,
+      `<path fill="none" stroke="${c}" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" ` +
+      `d="M12.00 3.90 L19.45 8.20 L19.45 16.80 L12.00 21.10 L4.55 16.80 L4.55 8.20Z` +
+      `M12.00 12.50L4.55 8.20M12.00 12.50L19.45 8.20M12.00 12.50L12.00 21.10"/>`,
   },
   {
     // A PDF: a filled page, its corner folded down.
@@ -573,14 +574,22 @@ async function makeThumbs($: Engine) {
   }
 }
 
+// How many of the newest paths the band skips. The middle button held over a path and dragged
+// left brings older paths in, dragged right newer ones, a path per DRAG_STEP columns.
+// A new reply brings the band back to the newest.
+const DRAG_STEP = 3
+let skipped = 0
+let skippedMax = 0
+let repliesSeen = -1
+// While the middle button is held: how many the band skipped at the press.
+let grabbedAt: number | undefined
+
 // The path under the pointer in the band, if any: its file name shows dim beside the buttons.
 let hovered: string | undefined
 // A short note after a right click copied a path; it stands where the hovered name would.
 let copiedNote: string | undefined
 
-export const register: Register = (on, options) => {
-  configure(options)
-
+export const register: Register = on => {
   // /path-buttons opens the settings pane.
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'path-buttons', description: 'Settings of the path buttons: programs, previews, symbols' })
@@ -648,14 +657,29 @@ export const register: Register = (on, options) => {
     )
   })
 
-  // The band's path regions (hit.tsx) post a left click as `open`, a right click as `show`.
+  // The band's path regions (hit.tsx) post a left click as `open`, a right click as `show`,
+  // and the middle button's press, drag and release.
   on('ui.message', async ($, e) => {
-    const data = (e as any).data as { action?: string; path?: string } | undefined
+    const data = (e as any).data as { action?: string; path?: string; dx?: number } | undefined
     const path = data?.path
     if (typeof path !== 'string') {
       return {}
     }
-    if (data?.action === 'enter' || data?.action === 'leave') {
+    if (data?.action === 'grab' || data?.action === 'drag') {
+      // A drag whose press was not delivered (one post a frame) starts from where the band stands.
+      if (data.action === 'grab' || grabbedAt === undefined) {
+        grabbedAt = skipped
+      }
+      const steps = data.action === 'drag' ? Math.round(-(data.dx ?? 0) / DRAG_STEP) : 0
+      const moved = Math.min(skippedMax, Math.max(0, grabbedAt + steps))
+      if (moved !== skipped || data.action === 'grab') {
+        skipped = moved
+        $.ui.invalidate('ui.render')
+      }
+    } else if (data?.action === 'release') {
+      grabbedAt = undefined
+      $.ui.invalidate('ui.render')
+    } else if (data?.action === 'enter' || data?.action === 'leave') {
       const next = data.action === 'enter' ? path : hovered === path ? undefined : hovered
       if (next !== hovered) {
         hovered = next
@@ -752,21 +776,41 @@ export const register: Register = (on, options) => {
     await syncBase($)
     await loadSettings($)
     const messages = await $.session.messages()
-    // Newest replies first, until the buttons are full; shown newest on the left.
-    const paths: string[] = []
-    for (const message of [...messages].reverse()) {
-      if (message.role !== 'assistant') {
-        continue
-      }
+    // Every path of the chat, newest reply first (at most a few hundred); the band shows seven of
+    // them, newest on the left, from where a middle-button drag has moved it.
+    const replies = messages.filter(message => message.role === 'assistant')
+    if (replies.length !== repliesSeen) {
+      repliesSeen = replies.length
+      skipped = 0
+    }
+    const all: string[] = []
+    for (const message of [...replies].reverse()) {
       for (const path of pathsOf(message.text).reverse()) {
-        if (paths.length < MAX_BUTTONS && !paths.some(known => known.toLowerCase() === path.toLowerCase())) {
-          paths.push(path)
+        if (!all.some(known => known.toLowerCase() === path.toLowerCase())) {
+          all.push(path)
         }
       }
-      if (paths.length >= MAX_BUTTONS) {
+      if (all.length >= 300) {
         break
       }
     }
+    // As many paths as fit beside the room kept for the name: a narrow band shows fewer,
+    // the oldest of the seven left out, so nothing pushes the name past the band's left edge.
+    const fitting = (from: number) => {
+      let room = (e.props.bodyColumns ?? 200) - TEXT_ROOM - OTHERS_ROOM - (from > 0 ? 6 : 0)
+      let count = 0
+      for (const path of all.slice(from, from + MAX_BUTTONS)) {
+        room -= columnsOf(path)
+        if (room < 0 && count > 0) {
+          break
+        }
+        count += 1
+      }
+      return count
+    }
+    skippedMax = Math.max(0, all.length - fitting(0))
+    skipped = Math.min(skipped, skippedMax)
+    const paths = all.slice(skipped, skipped + fitting(skipped))
     if (paths.length === 0) {
       return below
     }
@@ -804,23 +848,7 @@ export const register: Register = (on, options) => {
         `<image width="${thumb.width}" height="${thumb.height}" href="${data}" xlink:href="${data}" clip-path="url(#round)"/>` +
         `<g clip-path="url(#round)" fill="${colour}"><rect width="${thumb.width}" height="${bar}"/>` +
         `<rect y="${thumb.height - bar}" width="${thumb.width}" height="${bar}"/></g></svg>`
-      // A Button holds only text, so an empty Button lies over the preview and takes the click.
-      // The preview never shrinks, so the hovered name beside it cannot squeeze or shift it.
-      const spaces = ' '.repeat(Math.max(1, Math.round(width / 14)))
-      return (
-        <Box key={'thumb-box-' + i} position="relative" marginLeft="xs" flexShrink={0}>
-          <Svg key={'thumb-' + i} source={source} alt={symbol + ' ' + nameOf(path)} width={width} height={THUMB_DRAWN} />
-          <Box position="absolute" top={0} left={0} right={0} bottom={0} justifyContent="center" alignItems="center">
-            {Client !== undefined ? (
-              <Client key={'hit-' + i} module="./hit.tsx" props={{ path, label: spaces }} width="100%" height="100%" />
-            ) : (
-              <Button key={'path-' + i} label={spaces} plain onPress={() => {
-                $.clock.after(0, () => void open($, path))
-              }} />
-            )}
-          </Box>
-        </Box>
-      )
+      return <Svg key={'look-' + i} source={source} alt={symbol + ' ' + nameOf(path)} width={width} height={THUMB_DRAWN} />
     }
     // Blender files, text files and folders show a flat symbol in their colour; a click works as on a dot.
     const iconOf = (path: string, i: number) => {
@@ -831,34 +859,60 @@ export const register: Register = (on, options) => {
       const colour = FRAMES[colours.get(path.toLowerCase()) ?? 0] ?? '#b0b0b0'
       const source =
         `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">${icon.draw(colour)}</svg>`
+      return <Svg key={'look-' + i} source={source} alt={dotFor(path) + ' ' + nameOf(path)} width={ICON_DRAWN} height={ICON_DRAWN} />
+    }
+    // Every path the same frame: its look (preview, symbol or dot), and over it an invisible
+    // region of hit.tsx that takes the clicks and the middle-button drag. The same shape for
+    // all keeps the held region alive while a drag swaps the looks beneath it.
+    // Nothing in it shrinks, so the hovered name beside it cannot squeeze or shift it.
+    const slotOf = (path: string, i: number) => {
+      if (Client === undefined) {
+        return (
+          <Button key={'path-' + i} label={dotFor(path)} plain onPress={() => {
+            $.clock.after(0, () => void open($, path))
+          }} />
+        )
+      }
+      const preview = previewOf(path, i)
+      const look = preview ?? iconOf(path, i) ?? <Text key={'look-' + i}>{dotFor(path)}</Text>
       return (
-        <Box key={'icon-box-' + i} position="relative" marginX="xs" flexShrink={0}>
-          <Svg key={'icon-' + i} source={source} alt={dotFor(path) + ' ' + nameOf(path)} width={ICON_DRAWN} height={ICON_DRAWN} />
-          <Box position="absolute" top={0} left={0} right={0} bottom={0}>
+        <Box key={'slot-' + i} position="relative" flexShrink={0} marginLeft="xs" marginRight={preview === null ? 'xs' : undefined}>
+          {look}
+          <Box key={'over-' + i} position="absolute" top={0} left={0} right={0} bottom={0}>
             <Client key={'hit-' + i} module="./hit.tsx" props={{ path, label: ' ' }} width="100%" height="100%" />
           </Box>
         </Box>
       )
     }
+    const name = (copiedNote !== undefined || (hovered !== undefined && paths.includes(hovered)))
+      ? (copiedNote ?? (hovered === undefined ? '' : nameOf(hovered)))
+      : ''
+    const leftOver = (e.props.bodyColumns ?? 200) - OTHERS_ROOM - (skipped > 0 ? 6 : 0) - 3 -
+      paths.reduce((sum, path) => sum + columnsOf(path), 0)
+    // All the room left of the buttons, so the name starts at the band's left end; where that
+    // is more than there is, the box shrinks to fit.
+    const nameWidth = Math.max(TEXT_ROOM, leftOver + 12)
     const buttons = (
       <Box justifyContent="flex-end" alignItems="center">
-        {(copiedNote !== undefined || (hovered !== undefined && paths.includes(hovered))) && (
-          <Box key="hovered-name" marginRight="md" flexShrink={1} minWidth={0}>
-            {/* One line only: a long name is cut in the middle, so the band keeps its height. */}
-            <Text dimColor wrap="truncate-middle">{copiedNote ?? (hovered === undefined ? undefined : nameOf(hovered))}</Text>
+        {/* The hovered name left of the buttons, as wide as the band has room for (the paths shown
+            leave at least TEXT_ROOM); one line only, a long name cut in the middle. */}
+        {name !== '' && (
+          <Box key="hovered-name" width={nameWidth} flexShrink={1} minWidth={NAME_LEAST} marginRight="md">
+            <Text dimColor wrap="truncate-middle">{name}</Text>
           </Box>
         )}
-        {paths.map((path, i) => previewOf(path, i) ?? iconOf(path, i) ?? (Client !== undefined ? (
-          // A symbol as a region of hit.tsx: left click opens, right click shows the path.
-          // Symbols get room on both sides; previews stay close together.
-          <Box key={'hit-box-' + i} marginX="xs" flexShrink={0}>
-            <Client key={'hit-' + i} module="./hit.tsx" props={{ path, label: dotFor(path) }} />
+        {/* While the band shows older paths: a grey hand and how many newer ones are left out. */}
+        {skipped > 0 && (
+          <Box key="skipped" marginRight="sm" flexShrink={0} alignItems="center" gap="xs">
+            {Svg !== undefined ? (
+              <Svg key="hand" source={HAND} alt="older paths" width={ICON_DRAWN - 4} height={ICON_DRAWN - 4} />
+            ) : (
+              <Text key="hand">✋</Text>
+            )}
+            <Text key="count" dimColor>{'+' + skipped}</Text>
           </Box>
-        ) : (
-          <Button key={'path-' + i} label={dotFor(path)} plain onPress={() => {
-            $.clock.after(0, () => void open($, path))
-          }} />
-        )))}
+        )}
+        {paths.map(slotOf)}
         {!e.props.hasSurvey && below.type !== 'engine' && below}
       </Box>
     )

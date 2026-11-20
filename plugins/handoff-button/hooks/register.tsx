@@ -329,13 +329,18 @@ async function exportedChats($: Engine) {
 // The band's buttons, their dim hover hints, and what a press runs.
 type ButtonId = 'back' | 'advisor' | 'compact' | 'ask-handover' | 'handoff'
 const HINTS: Record<ButtonId, string> = {
-  back: 'Alter Chat (PDF)',
+  back: 'Previous chat (PDF)',
   advisor: 'Advisor (Opus)',
   compact: 'Compact',
-  'ask-handover': 'Handover anfragen',
-  handoff: 'Volles Handover',
+  'ask-handover': 'Ask for a handover',
+  handoff: 'Full handover',
 }
 let hint: ButtonId | undefined
+// Whether the band's rows are laid side by side: then the hint stands at the band's left end,
+// where path-buttons shows a hovered file name, not beside these buttons.
+let isCombined = false
+// The room kept for the hint (columns), as path-buttons keeps for its file name.
+const HINT_ROOM = 18
 let lastIsWorking = false
 let lastBack: Back | undefined
 
@@ -353,6 +358,16 @@ async function pressButton($: Engine, id: ButtonId) {
   } else {
     await handoff($, lastIsWorking)
   }
+}
+
+// The dim hint, one line: cut with an ellipsis when the band is short of room.
+// Beside path-buttons' row it takes all the free room, so it starts at the band's left end.
+function hintOf(Box: any, Text: any, fill = false) {
+  return (
+    <Box key="hint" marginRight="md" flexGrow={fill ? 1 : 0} flexShrink={1} minWidth={HINT_ROOM}>
+      <Text dimColor wrap="truncate-end">{hint === undefined ? '' : HINTS[hint]}</Text>
+    </Box>
+  )
 }
 
 export const register: Register = on => {
@@ -464,15 +479,20 @@ export const register: Register = on => {
     const rows = [...e.props.rows].sort((a, b) => rank(a.plugin) - rank(b.plugin))
     // Each row drawn on its own by the engine, then the drawn rows side by side in one Box.
     if (e.props.hasSurvey || rows.length < 2) {
+      isCombined = false
       return next({ ...e, props: { ...e.props, rows } })
     }
+    isCombined = true
     const drawn: any[] = []
     for (const row of rows) {
       drawn.push(await next({ ...e, props: { ...e.props, rows: [row] } }))
     }
-    const { Box } = $.ui.resolve(e) as any
+    const { Box, Text } = $.ui.resolve(e) as any
+    // The hint stands at the band's left end, where path-buttons shows a hovered file name.
+    // Nothing wraps the rows: a wrapper counts toward the band's limits, past them it is blank.
     return (
       <Box flexDirection="row" justifyContent="flex-end" alignItems="center" gap="sm">
+        {hint !== undefined && hintOf(Box, Text, true)}
         {drawn}
       </Box>
     )
@@ -513,12 +533,8 @@ export const register: Register = on => {
 
     return (
       <Box justifyContent="flex-end" alignItems="center" gap="sm">
-        {/* The hint stands leftmost, where path-buttons shows a hovered file name. */}
-        {hint !== undefined && (
-          <Box key="hint" marginRight="md">
-            <Text dimColor>{HINTS[hint]}</Text>
-          </Box>
-        )}
+        {/* Alone in the band, the hint stands left of the buttons. */}
+        {hint !== undefined && !isCombined && hintOf(Box, Text)}
         {others.type !== 'engine' && others}
         {back !== undefined && button('back', '<<')}
         {button('advisor', '⌾')}

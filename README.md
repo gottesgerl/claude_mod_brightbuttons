@@ -61,9 +61,10 @@ The buttons show the paths of the latest replies, newest on the left, at most se
 
 In the band:
 - **Images and videos** show as a small, pale black-and-white preview with rounded corners and a bar in their colour at top and bottom. Videos show their frame at one second. The preview is made by `ffmpeg` (looked for in `Program Files\ffmpeg\bin` on Windows, in `/opt/homebrew/bin`, `/usr/local/bin` and `/usr/bin` elsewhere, else on the PATH) as a small JPEG in the temp folder. Without ffmpeg, or until the preview is ready, a symbol stands in.
-- **Symbols** in the path's colour: Blender logo (`.blend`), spiral (Houdini `.hip`, `.hda`, `.otl`), `>` (Python and scripts: `.py`, `.ps1`, `.sh`, `.bat`, `.js`, `.ts`, `.tsx`), tree slice (`.log`), gear (data and settings: `.json`, `.yaml`, `.xml`, `.ini`, `.ocio`), cube (3D: `.usd`, `.glb`, `.fbx`, `.obj`, `.abc`), page (`.pdf`), network in a disc (models: `.safetensors`, `.ckpt`, `.pt`, `.gguf`, `.onnx`), two lines (`.md`, `.txt`), folder, film reel (video, until its preview is ready). Other files keep their dot.
+- **Symbols** in the path's colour: Blender logo (`.blend`), spiral (Houdini `.hip`, `.hda`, `.otl`), `>` (Python and scripts: `.py`, `.ps1`, `.sh`, `.bat`, `.js`, `.ts`, `.tsx`), tree slice (`.log`), gear (data and settings: `.json`, `.yaml`, `.xml`, `.ini`, `.ocio`), wire cube (3D: `.usd`, `.glb`, `.fbx`, `.obj`, `.abc`), page (`.pdf`), network in a disc (models: `.safetensors`, `.ckpt`, `.pt`, `.gguf`, `.onnx`), two lines (`.md`, `.txt`), folder, film reel (video, until its preview is ready). Other files keep their dot.
 - **Left click** opens the path, **right click** copies the full path to the clipboard ("Path copied" shows for a moment).
-- **Hovering** shows the file name dimmed on the left of the band.
+- **Hovering** shows the file name dimmed left of the buttons; a narrow band shows fewer paths so the name keeps its room.
+- **Older paths:** hold the middle mouse button over a path and drag left for older paths of the chat, right for newer ones While older paths show, a grey hand and a dim `+N` count the newer paths left out. A new reply brings the band back to the newest.
 
 | Path | Opens in |
 | --- | --- |
@@ -85,27 +86,13 @@ The settings are kept across sessions.
 
 Relative paths like `blender/shot01/frame.png` are found without any setup when their first folder lies directly in the session's project folder. The mod reads the project's folders for this (again when the project changes and every 30 seconds). Words with a slash that do not start with a project folder stay plain text.
 
-Short names for deeper folders can be set optionally, in `~/.claude/settings.json` or under `/config` in Claude:
-
-```json
-"pluginConfigs": {
-  "path-buttons@path-buttons": {
-    "options": {
-      "aliases": "shot01=blender/shots/shot01"
-    }
-  }
-}
-```
-
-`shot01/frame.png` then opens `<project>/blender/shots/shot01/frame.png`.
-
 Notes:
 - Paths are found as `C:\...` or `C:/...` (Windows), `/Users/...`, `/home/...`, `/Volumes/...`, `/mnt/...` and other usual top folders, and `~/...`. In backticks any absolute path counts. Paths with spaces are found only in backticks.
 - To bring Directory Opus forward, a small PowerShell script is written to the temp folder (`path-buttons-focus-opus.ps1`).
 
 ## handoff-button
 
-Four buttons on the right of the band above the prompt. Hovering shows a short hint on the left of the band.
+Four buttons on the right of the band above the prompt. Hovering shows a short hint on the left of the band, where `path-buttons` shows a file name.
 
 | Button | What it does |
 | --- | --- |
