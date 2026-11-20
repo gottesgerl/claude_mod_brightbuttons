@@ -1,7 +1,7 @@
 {
   "name": "handoff-button",
-  "version": "0.5.3",
-  "description": "⌾-Button: sofort /advisor opus. C-Button: sofort /compact. H-Button: bittet um ein Handover. ⤓-Button: Chat komprimieren, in [A] umbenennen, neuen Chat [B] mit der Übergabe starten, den alten archivieren. Beim Überfahren erscheint ein kurzer Hinweis. Zeigt Buttons anderer Mods (bright-buttons) links neben dem H.",
+  "version": "0.7.1",
+  "description": "⌾: /advisor with the chosen model (right click: pick Opus, Sonnet or Haiku for this chat). C: /compact now (right click: compact when idle for this chat, 10 minutes after a reply when the context is half full; the C turns red). H: asks for a handover (right click: full handover mode, shown as ⤓: compact, rename to [A], start chat [B] with the handover, archive the old one). Thumb: types \"Yes, please\". A short hint shows on hover. Shows other mods' buttons (bright-buttons) left of them.",
   "author": {
     "name": "gottesgerl"
   }

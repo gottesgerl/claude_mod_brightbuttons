@@ -5,7 +5,7 @@ Two mods for Claude Code (desktop app and terminal) that together form a band ab
 | Mod | What it does |
 | --- | --- |
 | `bright-buttons` | A coloured button per path from the latest replies, a small preview for images and videos. Left click opens, right click copies the path. Windows, macOS and Linux. |
-| `handoff-button` | `⌾` runs `/advisor opus`, `C` runs `/compact`, `H` asks for a handover, `⤓` exports the chat, renames it `[A]`, starts a new chat `[B]` with the handover and archives the old one. Lays the `bright-buttons` row beside its own. Windows. |
+| `handoff-button` | `⌾` runs `/advisor` with the chosen model, `C` runs `/compact` (or compacts by itself when idle), `H` asks for a handover; in full handover mode (`⤓`) it exports the chat, renames it `[A]`, starts a new chat `[B]` with the handover and archives the old one. A thumb types "Yes, please". A right click sets each button's option. Lays the `bright-buttons` row beside its own. Windows. |
 
 Each mod works on its own. With both, the coloured buttons stand left of the H.
 
@@ -92,16 +92,18 @@ Notes:
 
 ## handoff-button
 
-Four buttons on the right of the band above the prompt. Hovering shows a short hint on the left of the band, where `bright-buttons` shows a file name.
+Four buttons on the right of the band above the prompt. Hovering shows a short hint on the left of the band, where `bright-buttons` shows a file name. A right click sets each button's option.
 
-| Button | What it does |
-| --- | --- |
-| `⌾` | runs `/advisor opus` at once |
-| `C` | runs `/compact` at once, without asking |
-| `H` | sends "Bitte schreib ein Handover." as if you had typed it |
-| `⤓` | the full handover, see below |
+| Button | Left click | Right click |
+| --- | --- | --- |
+| `⌾` | runs `/advisor` with the chosen model (Opus at first) | shows `Opus Sonnet Haiku` beside it; a pick turns the advisor on with that model and stays chosen |
+| `C` | runs `/compact` at once, without asking | turns compact when idle on or off: 10 minutes after a reply, with nothing new typed, the chat is compacted if its context is at least half full; while on, the `C` is red |
+| `H` | sends "Bitte schreib ein Handover." as if you had typed it | switches to full handover mode: the button shows `⤓`; another right click switches back |
+| thumb | sends "Yes, please" as if you had typed it | – |
 
-The `⤓` button:
+The advisor model and compact when idle are set per chat: a new chat starts with Opus and without compact when idle. The handover mode stays from chat to chat. Claude Code's own auto-compact setting is left alone.
+
+In full handover mode the `⤓` button:
 1. exports the chat as `.txt` and `.pdf` to `Documents\Claude Handoffs`,
 2. has a handover written,
 3. renames the chat `… [A]`, clears it and starts it as `… [B]` with the handover,
