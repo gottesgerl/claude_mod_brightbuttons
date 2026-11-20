@@ -5,6 +5,7 @@ const VERSION = /\s\[([A-Z])\]\s*$/
 const AFTER_CLEAR_MS = 2000
 const IMPORT_MAX_CHARS = 200000
 const IMPORT_PANE = 'import-chat'
+const SETTINGS_PANE = 'handoff-button-settings'
 const EDGE_SUBPATH = '\\Microsoft\\Edge\\Application\\msedge.exe'
 
 // Resolved per machine and user on first use: no user name or install path is baked in.
@@ -332,9 +333,9 @@ async function exportedChats($: Engine) {
 // on H switches between asking for a handover and the full handover.
 type ButtonId = 'back' | 'advisor' | 'compact' | 'handover' | 'yes'
 const BUTTONS: readonly string[] = ['back', 'advisor', 'compact', 'handover', 'yes']
-const MODELS = ['opus', 'sonnet', 'haiku'] as const
+const MODELS = ['fable', 'opus', 'sonnet', 'haiku'] as const
 type Model = (typeof MODELS)[number]
-const MODEL_NAMES: Record<Model, string> = { opus: 'Opus', sonnet: 'Sonnet', haiku: 'Haiku' }
+const MODEL_NAMES: Record<Model, string> = { fable: 'Fable', opus: 'Opus', sonnet: 'Sonnet', haiku: 'Haiku' }
 let advisorModel: Model = 'opus'
 let isPicking = false
 let isFullHandover = false
@@ -342,22 +343,49 @@ let isLoaded = false
 // The chat the advisor model and compact-when-idle were read for: both are set per chat.
 let chatLoaded = ''
 
-// Compact when idle: once a reply is done and nothing new comes for IDLE_MS, the chat is
-// compacted if its context is at least IDLE_PERCENT full. The API's cache has run out by then,
+// Compact when idle: once a reply is done and nothing new comes for idleMinutes, the chat is
+// compacted if its context is at least idlePercent full. The API's cache has run out by then,
 // so the next message would read the whole chat anew anyway; compacted, it starts small.
-const IDLE_MS = 10 * 60 * 1000
-const IDLE_PERCENT = 50
+// Both figures are settings (the settings pane), for every chat alike.
+let idleMinutes = 10
+let idlePercent = 50
 let isIdleCompact = false
 let isTurnRunning = false
 let idleTimer: { cancel: () => void } | undefined
 
-// The thumb's answer, typed into the chat as if the person had.
-const YES_TEXT = 'Yes, please'
+// The thumb's answer, typed into the chat as if the person had, in the language of the settings.
+const LANGUAGES = ['en', 'es', 'zh', 'fr', 'uk', 'ja', 'ko', 'de'] as const
+type Language = (typeof LANGUAGES)[number]
+const LANGUAGE_NAMES: Record<Language, string> = {
+  en: 'English', es: 'Español', fr: 'Français', uk: 'Українська',
+  ja: '日本語', ko: '한국어', zh: '中文', de: 'Deutsch',
+}
+const YES: Record<Language, string> = {
+  en: 'Yes, please', es: 'Sí, por favor', fr: "Oui, s'il te plaît", uk: 'Так, будь ласка',
+  ja: 'はい、お願いします', ko: '네, 부탁해요', zh: '好的，麻烦了', de: 'Ja, bitte',
+}
+// Small flags for the language list: plain drawings, since Windows draws no flag emoji.
+const FLAGS: Record<Language, string> = {
+  en: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 16"><rect width="24" height="16" fill="#012169"/><path d="M0 0L24 16M24 0L0 16" stroke="#fff" stroke-width="3.2"/><path d="M0 0L24 16M24 0L0 16" stroke="#C8102E" stroke-width="1.1"/><path d="M12 0V16M0 8H24" stroke="#fff" stroke-width="5"/><path d="M12 0V16M0 8H24" stroke="#C8102E" stroke-width="3"/></svg>',
+  es: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 16"><rect width="24" height="16" fill="#AA151B"/><rect y="4" width="24" height="8" fill="#F1BF00"/></svg>',
+  fr: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 16"><rect width="24" height="16" fill="#fff"/><rect width="8" height="16" fill="#0055A4"/><rect x="16" width="8" height="16" fill="#EF4135"/><rect x="0.25" y="0.25" width="23.5" height="15.5" fill="none" stroke="#bbb" stroke-width="0.5"/></svg>',
+  uk: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 16"><rect width="24" height="16" fill="#FFD700"/><rect width="24" height="8" fill="#0057B7"/></svg>',
+  ja: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 16"><rect width="24" height="16" fill="#fff"/><circle cx="12" cy="8" r="4.8" fill="#BC002D"/><rect x="0.25" y="0.25" width="23.5" height="15.5" fill="none" stroke="#bbb" stroke-width="0.5"/></svg>',
+  ko: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 16"><rect width="24" height="16" fill="#fff"/><circle cx="12" cy="8" r="4" fill="#0047A0"/><path d="M8.67 5.78A4 4 0 0 1 15.33 10.22A2 2 0 0 1 12 8A2 2 0 0 0 8.67 5.78Z" fill="#CD2E3A"/><g transform="translate(5.2 3.6) rotate(-56)" fill="#000"><rect x="-1.6" y="-1.15" width="3.2" height="0.55"/><rect x="-1.6" y="-0.30" width="3.2" height="0.55"/><rect x="-1.6" y="0.55" width="3.2" height="0.55"/></g><g transform="translate(18.8 3.6) rotate(56)" fill="#000"><rect x="-1.6" y="-1.15" width="3.2" height="0.55"/><rect x="-1.6" y="-0.30" width="3.2" height="0.55"/><rect x="-1.6" y="0.55" width="3.2" height="0.55"/></g><g transform="translate(5.2 12.4) rotate(56)" fill="#000"><rect x="-1.6" y="-1.15" width="3.2" height="0.55"/><rect x="-1.6" y="-0.30" width="3.2" height="0.55"/><rect x="-1.6" y="0.55" width="3.2" height="0.55"/></g><g transform="translate(18.8 12.4) rotate(-56)" fill="#000"><rect x="-1.6" y="-1.15" width="3.2" height="0.55"/><rect x="-1.6" y="-0.30" width="3.2" height="0.55"/><rect x="-1.6" y="0.55" width="3.2" height="0.55"/></g><rect x="0.25" y="0.25" width="23.5" height="15.5" fill="none" stroke="#bbb" stroke-width="0.5"/></svg>',
+  zh: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 16"><rect width="24" height="16" fill="#EE1C25"/><path fill="#FFFF00" d="M4.00 1.60 L4.54 3.26 L6.28 3.26 L4.87 4.28 L5.41 5.94 L4.00 4.92 L2.59 5.94 L3.13 4.28 L1.72 3.26 L3.46 3.26ZM8.27 0.85 L8.25 1.43 L8.80 1.63 L8.24 1.79 L8.22 2.37 L7.90 1.89 L7.34 2.05 L7.69 1.59 L7.37 1.11 L7.92 1.31ZM10.17 2.63 L9.90 3.15 L10.31 3.56 L9.74 3.47 L9.47 3.99 L9.38 3.42 L8.81 3.33 L9.33 3.06 L9.24 2.49 L9.65 2.90ZM10.35 5.33 L9.89 5.68 L10.09 6.23 L9.61 5.91 L9.15 6.26 L9.31 5.70 L8.83 5.38 L9.41 5.36 L9.57 4.80 L9.77 5.35ZM8.27 6.45 L8.25 7.03 L8.80 7.23 L8.24 7.39 L8.22 7.97 L7.90 7.49 L7.34 7.65 L7.69 7.19 L7.37 6.71 L7.92 6.91Z"/></svg>',
+  de: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 16"><rect width="24" height="16" fill="#FFCE00"/><rect width="24" height="10.67" fill="#DD0000"/><rect width="24" height="5.33" fill="#000"/></svg>',
+}
+let language: Language = 'en'
+let isChoosingLanguage = false
+const yesText = () => YES[language]
+// Compact when idle on: an outlined C in red in place of the plain one.
+const C_RED = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="none" stroke="#e5484d" stroke-width="1.3" stroke-linejoin="round" d="M18.16 6.34 A8 8 0 1 0 18.16 17.66 L15.75 15.25 A4.6 4.6 0 1 1 15.75 8.75 Z"/></svg>'
 // A thumb up drawn as the bright-buttons hand is: a thin grey outline.
 const THUMB =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="none" stroke="#9a9a9a" stroke-width="1.3" ' +
   'stroke-linecap="round" stroke-linejoin="round" d="M7.4 21.2 H15.6 A1.3 1.3 0 0 0 15.6 18.6 A1.3 1.3 0 0 0 15.6 16 A1.3 1.3 0 0 0 15.6 13.4 A1.3 1.3 0 0 0 15.6 10.8 H10.9 L11.6 6.6 C11.9 4.6 11.2 3.1 10 3.1 C9.1 3.1 8.8 3.9 8.6 5 C8.2 7.4 7.2 9.4 5.4 10.8 C4.8 11.3 4.5 12 4.5 12.8 V18.4 C4.5 20 5.8 21.2 7.4 21.2 Z"/></svg>'
 const THUMB_DRAWN = 18
+const C_DRAWN = 16
 
 function hintText(id: ButtonId) {
   if (id === 'back') {
@@ -370,7 +398,7 @@ function hintText(id: ButtonId) {
     return isIdleCompact ? 'Compact (when idle)' : 'Compact'
   }
   if (id === 'yes') {
-    return YES_TEXT
+    return yesText()
   }
   return isFullHandover ? 'Full handover' : 'Handover'
 }
@@ -378,10 +406,14 @@ let hint: ButtonId | undefined
 // Whether the band's rows are laid side by side: then the hint stands at the band's left end,
 // where bright-buttons shows a hovered file name, not beside these buttons.
 let isCombined = false
-// The room kept for the hint (columns), as bright-buttons keeps for its file name.
-const HINT_ROOM = 18
+// The room kept for the hint (columns), as bright-buttons keeps for its file name (its setting).
+let hintRoom = 18
+// Narrower than this (columns), the band leaves the thumb out first.
+const THUMB_LEAST = 64
 let lastIsWorking = false
 let lastBack: Back | undefined
+// Whether the band is wide enough for the thumb, as the list last measured it.
+let isThumbShown = true
 
 // The handover mode lasts from chat to chat; the advisor model and compact-when-idle belong to
 // one chat each (a new chat starts with Opus and without compact-when-idle).
@@ -389,6 +421,15 @@ async function loadState($: Engine) {
   if (!isLoaded) {
     isLoaded = true
     isFullHandover = (await $.store.get('full-handover')) === true
+    const minutes = Number(await $.store.get('idle-minutes'))
+    const percent = Number(await $.store.get('idle-percent'))
+    ownMinutes = Number.isFinite(minutes) && minutes >= 1 ? minutes : 10
+    ownPercent = Number.isFinite(percent) && percent >= 1 && percent <= 100 ? percent : 50
+    const stored = (await $.store.get('language')) as Language | undefined
+    ownLanguage = stored !== undefined && LANGUAGES.includes(stored) ? stored : 'en'
+    idleMinutes = ownMinutes
+    idlePercent = ownPercent
+    language = ownLanguage
   }
   const id = await $.session.id()
   if (chatLoaded === id) {
@@ -404,6 +445,63 @@ async function loadState($: Engine) {
   }
 }
 
+// With bright-buttons, its settings pane holds these settings too: handoff-button hands it its own
+// values and languages, and takes the values set there ($.state, for the session).
+const SHARED = { plugin: 'bright-buttons', key: 'shared' } as const
+const OWN = { plugin: 'handoff-button', key: 'settings' } as const
+let ownMinutes = 10
+let ownPercent = 50
+let ownLanguage: Language = 'en'
+let isPublished = false
+let isBrightHere = false
+
+async function publish($: Engine) {
+  isPublished = true
+  try {
+    await $.state.set(OWN, {
+      idleMinutes: ownMinutes,
+      idlePercent: ownPercent,
+      language: ownLanguage,
+      languages: LANGUAGES.map(id => ({ id, name: LANGUAGE_NAMES[id], flag: FLAGS[id], yes: YES[id] })),
+    })
+  } catch {
+    isPublished = false
+  }
+}
+
+// The values in force: bright-buttons' where it set them, else our own.
+async function readShared($: Engine) {
+  let shared: { textRoom?: number; idleMinutes?: number; idlePercent?: number; language?: string } | undefined
+  try {
+    const read = await $.state.get(SHARED)
+    shared = read.version > 0 ? read.value : undefined
+  } catch {
+    shared = undefined
+  }
+  isBrightHere = shared !== undefined
+  const lang = shared?.language as Language | undefined
+  idleMinutes = shared?.idleMinutes ?? ownMinutes
+  idlePercent = shared?.idlePercent ?? ownPercent
+  language = lang !== undefined && LANGUAGES.includes(lang) ? lang : ownLanguage
+  hintRoom = shared?.textRoom ?? 18
+}
+
+// The settings open in bright-buttons' pane when it runs, else in our own.
+function openSettings($: Engine) {
+  $.clock.after(0, async () => {
+    await readShared($)
+    if (isBrightHere) {
+      try {
+        await $.command.run({ command: 'bright-buttons' })
+        return
+      } catch (error) {
+        await log($, 'bright-buttons settings: ' + String(error))
+      }
+    }
+    await $.ui.open({ id: SETTINGS_PANE, title: 'Handoff buttons' })
+  })
+}
+
 function stopIdle() {
   idleTimer?.cancel()
   idleTimer = undefined
@@ -414,16 +512,17 @@ function startIdle($: Engine) {
   if (!isIdleCompact) {
     return
   }
-  idleTimer = $.clock.after(IDLE_MS, async () => {
+  idleTimer = $.clock.after(idleMinutes * 60 * 1000, async () => {
     idleTimer = undefined
     if (!isIdleCompact || isTurnRunning || isRunning) {
       return
     }
     try {
+      await readShared($)
       const { context } = await $.session.usage()
       const percent = context.percent ?? (context.tokens === undefined ? 0 : Math.round(100 * context.tokens / context.window))
       await log($, 'idle check: context ' + percent + '%')
-      if (percent >= IDLE_PERCENT) {
+      if (percent >= idlePercent) {
         await compact($)
       }
     } catch (error) {
@@ -444,11 +543,121 @@ async function toggleIdleCompact($: Engine) {
 }
 
 async function sayYes($: Engine) {
+  await readShared($)
   try {
-    await $.prompt.submit({ text: YES_TEXT, asUser: true })
+    await $.prompt.submit({ text: yesText(), asUser: true })
   } catch (error) {
     $.ui.toast('Senden ging nicht: ' + String(error).slice(0, 200))
   }
+}
+
+async function saveIdle($: Engine, field: 'minutes' | 'percent', text: string) {
+  const value = Math.round(Number(text.trim()))
+  const isOk = field === 'minutes' ? value >= 1 && value <= 600 : value >= 1 && value <= 100
+  if (!Number.isFinite(value) || !isOk) {
+    $.ui.toast(field === 'minutes' ? 'Minutes: 1 to 600.' : 'Percent: 1 to 100.')
+    return
+  }
+  if (field === 'minutes') {
+    ownMinutes = value
+    idleMinutes = value
+    await $.store.set('idle-minutes', value)
+    if (idleTimer !== undefined) {
+      startIdle($)
+    }
+  } else {
+    ownPercent = value
+    idlePercent = value
+    await $.store.set('idle-percent', value)
+  }
+  await publish($)
+  $.ui.invalidate('ui.render')
+}
+
+async function chooseLanguage($: Engine, next: Language) {
+  language = next
+  ownLanguage = next
+  isChoosingLanguage = false
+  await $.store.set('language', next)
+  await publish($)
+  $.ui.invalidate('ui.render')
+}
+
+// The settings of these buttons: compact when idle and the language, a list of small flags.
+function settingsOf($: Engine, ui: any) {
+  const { Box, Text, Input, Button, Svg } = ui
+  const flag = (lang: Language) => Svg === undefined
+    ? undefined
+    : <Svg key={'flag-' + lang} source={FLAGS[lang]} alt={LANGUAGE_NAMES[lang]} width={21} height={14} />
+  return (
+    <Box key="handoff-settings" flexDirection="column" gap="sm">
+      <Text bold>Handoff buttons</Text>
+      <Text dimColor>Compact when idle (right click on C, per chat): after a reply, with nothing new for this long, the chat is compacted if its context is this full. Enter saves.</Text>
+      <Input
+        key="idleMinutes"
+        label="Minutes: "
+        value={String(idleMinutes)}
+        submitLabel="save"
+        onSubmit={(value: string) => void saveIdle($, 'minutes', value)}
+      />
+      <Input
+        key="idlePercent"
+        label="Context at least (%): "
+        value={String(idlePercent)}
+        submitLabel="save"
+        onSubmit={(value: string) => void saveIdle($, 'percent', value)}
+      />
+      <Text dimColor>Language: for now, what the thumb sends.</Text>
+      <Box key="language-now" flexDirection="row" alignItems="center" gap="sm">
+        {flag(language)}
+        <Button key="language-open" plain label={LANGUAGE_NAMES[language] + (isChoosingLanguage ? '  ▴' : '  ▾')} onPress={() => {
+          isChoosingLanguage = !isChoosingLanguage
+          $.ui.invalidate('ui.render')
+        }} />
+      </Box>
+      {isChoosingLanguage && LANGUAGES.map(lang => (
+        <Box key={'language-' + lang} flexDirection="row" alignItems="center" gap="sm" marginLeft="md">
+          {flag(lang)}
+          <Button key={'pick-' + lang} plain dimColor={lang !== language} label={LANGUAGE_NAMES[lang]} onPress={() => {
+            $.clock.after(0, () => void chooseLanguage($, lang))
+          }} />
+        </Box>
+      ))}
+      <Text dimColor>{'The thumb sends: ' + yesText()}</Text>
+    </Box>
+  )
+}
+
+// One of the band's buttons. Each keeps its look (a drawing where it has one); an invisible region
+// of hover.tsx over it shows a dim hint while the pointer is on it and runs the action on a click.
+// Without regions, plain buttons.
+// A drawing on a button (the red C) keeps the button's grey field: the button stands under it with a
+// blank label of a letter's width, the drawing centred on top.
+function buttonOf($: Engine, ui: any, id: ButtonId, label: string, drawing?: string, isOnField = false) {
+  const { Box, Button, Svg, Client } = ui
+  const isDrawn = drawing !== undefined && Svg !== undefined && Client !== undefined
+  const press = () => {
+    $.clock.after(0, () => void pressButton($, id))
+  }
+  return (
+    <Box key={'wrap-' + id} position="relative" flexShrink={0}>
+      {isDrawn && !isOnField ? (
+        <Svg key={'look-' + id} source={drawing} alt={label} width={THUMB_DRAWN} height={THUMB_DRAWN} />
+      ) : (
+        <Button key={id} label={isDrawn ? ' ' : label} dimColor onPress={press} />
+      )}
+      {isDrawn && isOnField && (
+        <Box key={'field-' + id} position="absolute" top={0} left={0} right={0} bottom={0} alignItems="center" justifyContent="center">
+          <Svg key={'look-' + id} source={drawing} alt={label} width={C_DRAWN} height={C_DRAWN} />
+        </Box>
+      )}
+      {Client !== undefined && (
+        <Box position="absolute" top={0} left={0} right={0} bottom={0}>
+          <Client key={'hover-' + id} module="./hover.tsx" props={{ id }} width="100%" height="100%" />
+        </Box>
+      )}
+    </Box>
+  )
 }
 
 async function pickModel($: Engine, model: Model) {
@@ -467,6 +676,9 @@ async function rightClick($: Engine, id: ButtonId) {
   } else if (id === 'handover') {
     isFullHandover = !isFullHandover
     await $.store.set('full-handover', isFullHandover)
+  } else if (id === 'yes') {
+    // A right click on the thumb opens the settings.
+    openSettings($)
   }
   $.ui.invalidate('ui.render')
 }
@@ -491,9 +703,10 @@ async function pressButton($: Engine, id: ButtonId) {
 
 // The dim hint, one line: cut with an ellipsis when the band is short of room.
 // Beside bright-buttons' row it takes all the free room, so it starts at the band's left end.
+// Without a hint it keeps no room: bright-buttons' hovered name takes it, and the thumb stays.
 function hintOf(Box: any, Text: any, fill = false) {
   return (
-    <Box key="hint" marginRight="md" flexGrow={fill ? 1 : 0} flexShrink={1} minWidth={HINT_ROOM}>
+    <Box key="hint" marginRight={hint === undefined ? undefined : 'md'} flexGrow={fill ? 1 : 0} flexShrink={1} minWidth={hint === undefined ? 0 : hintRoom}>
       <Text dimColor wrap="truncate-end">{hint === undefined ? '' : hintText(hint)}</Text>
     </Box>
   )
@@ -534,12 +747,36 @@ export const register: Register = on => {
     if ((e as any).agentId === undefined) {
       isTurnRunning = false
       await loadState($)
+      await readShared($)
       startIdle($)
     }
     return next(e)
   })
 
+  // /handoff-button and a right click on the thumb open the settings: bright-buttons' pane, which
+  // holds them too, when it runs (a pane belongs to one mod), else this mod's own.
+  on('command.run', { command: 'handoff-button' }, async $ => {
+    await loadState($)
+    openSettings($)
+    return { text: 'Handoff buttons settings opened.' }
+  })
+
+  on('ui.render', { component: 'Pane', requestId: SETTINGS_PANE }, async ($, e) => {
+    await loadState($)
+    return settingsOf($, $.ui.resolve(e))
+  })
+
   on('session.start', async ($, e, next) => {
+    try {
+      await loadState($)
+      await publish($)
+    } catch (error) {
+      await log($, 'publish settings: ' + String(error))
+    }
+    await $.command.register({
+      name: 'handoff-button',
+      description: 'Settings of the handoff buttons: compact when idle, language',
+    })
     await $.command.register({
       name: 'import-chat',
       description: 'Einen exportierten Chat aus "Claude Handoffs" in diesen Chat laden',
@@ -625,7 +862,11 @@ export const register: Register = on => {
   // bright-buttons first, these buttons last, all on one line at the right.
   on('ui.render', { component: 'AbovePromptList' }, async ($, e, next) => {
     const rank = (plugin: string) => (plugin.includes('bright-buttons') || plugin.includes('path-buttons') ? 0 : plugin.includes('handoff-button') ? 2 : 1)
-    const rows = [...e.props.rows].sort((a, b) => rank(a.plugin) - rank(b.plugin))
+    // While the advisor's models are shown, the band holds them alone.
+    const rows = [...e.props.rows]
+      .filter(row => !isPicking || row.plugin.includes('handoff-button'))
+      .sort((a, b) => rank(a.plugin) - rank(b.plugin))
+    isThumbShown = !isPicking && e.props.bodyColumns >= THUMB_LEAST
     // Each row drawn on its own by the engine, then the drawn rows side by side in one Box.
     if (e.props.hasSurvey || rows.length < 2) {
       isCombined = false
@@ -636,14 +877,15 @@ export const register: Register = on => {
     for (const row of rows) {
       drawn.push(await next({ ...e, props: { ...e.props, rows: [row] } }))
     }
-    const { Box, Text } = $.ui.resolve(e) as any
-    // The hint stands at the band's left end, where bright-buttons shows a hovered file name.
-    // Nothing wraps the rows: a wrapper counts toward the band's limits, past them it is blank.
+    const ui = $.ui.resolve(e) as any
+    // The thumb at the band's left end, the hint right of it, where bright-buttons shows a hovered
+    // file name. Nothing wraps the rows: a wrapper counts toward the band's limits, past them it is blank.
     return (
-      <Box flexDirection="row" justifyContent="flex-end" alignItems="center" gap="sm">
-        {hint !== undefined && hintOf(Box, Text, true)}
+      <ui.Box flexDirection="row" justifyContent="flex-end" alignItems="center" gap="sm">
+        {isThumbShown && buttonOf($, ui, 'yes', '👍', THUMB)}
+        {(isThumbShown || hint !== undefined) && hintOf(ui.Box, ui.Text, true)}
         {drawn}
-      </Box>
+      </ui.Box>
     )
   })
 
@@ -663,50 +905,37 @@ export const register: Register = on => {
     const back = backTo
 
     await loadState($)
+    await readShared($)
+    if (!isPublished) {
+      isPublished = true
+      $.clock.after(0, () => void publish($))
+    }
     lastIsWorking = e.props.isWorking
     lastBack = back
-    const { Text, Client } = $.ui.resolve(e) as any
-    // Each button keeps its look; an invisible region of hover.tsx over it shows a dim hint
-    // while the pointer is on it and runs the action on a click. Without regions, plain buttons.
-    const { Svg } = $.ui.resolve(e) as any
-    const button = (id: ButtonId, label: string, color?: string) => (
-      <Box key={'wrap-' + id} position="relative">
-        {id === 'yes' && Svg !== undefined && Client !== undefined ? (
-          <Svg key="look-yes" source={THUMB} alt={YES_TEXT} width={THUMB_DRAWN} height={THUMB_DRAWN} />
-        ) : (
-          <Button key={id} label={label} dimColor={color === undefined} onPress={() => {
-            $.clock.after(0, () => void pressButton($, id))
-          }}>
-            {color !== undefined ? [<Text key={'label-' + id} color={color}>{label}</Text>] : undefined}
-          </Button>
-        )}
-        {Client !== undefined && (
-          <Box position="absolute" top={0} left={0} right={0} bottom={0}>
-            <Client key={'hover-' + id} module="./hover.tsx" props={{ id }} width="100%" height="100%" />
-          </Box>
-        )}
-      </Box>
-    )
+    const ui = $.ui.resolve(e) as any
+    const button = (id: ButtonId, label: string, drawing?: string) => buttonOf($, ui, id, label, drawing)
+    // Alone in the band (no other mod's row), the thumb and the hint stand here, at the left end.
+    const isAlone = !isCombined
+    const isThumbHere = isAlone && !isPicking && e.props.bodyColumns >= THUMB_LEAST
 
     return (
       <Box justifyContent="flex-end" alignItems="center" gap="sm">
-        {/* Alone in the band, the hint stands left of the buttons. */}
-        {hint !== undefined && !isCombined && hintOf(Box, Text)}
-        {others.type !== 'engine' && others}
-        {back !== undefined && button('back', '<<')}
-        {/* After a right click on ⌾ the models stand left of it; the chosen one at full strength. */}
+        {isThumbHere && button('yes', '👍', THUMB)}
+        {isAlone && (isThumbHere || hint !== undefined) && hintOf(Box, ui.Text, isThumbHere)}
+        {!isPicking && others.type !== 'engine' && others}
+        {!isPicking && back !== undefined && button('back', '<<')}
+        {/* After a right click on ⌾ the models stand left of it, the other buttons out of the way;
+            the chosen model at full strength. */}
         {isPicking && MODELS.map(model => (
           <Button key={'model-' + model} label={MODEL_NAMES[model]} plain dimColor={model !== advisorModel} onPress={() => {
             $.clock.after(0, () => void pickModel($, model))
           }} />
         ))}
         {button('advisor', '⌾')}
-        {/* Compact when idle on: the C in red. */}
-        {button('compact', 'C', isIdleCompact ? 'error' : undefined)}
+        {/* Compact when idle on: an outlined C in red. */}
+        {!isPicking && buttonOf($, ui, 'compact', 'C', isIdleCompact ? C_RED : undefined, true)}
         {/* Full handover mode: ⤓ in place of H. */}
-        {button('handover', isFullHandover ? '⤓' : 'H')}
-        {/* The thumb answers "Yes, please". */}
-        {button('yes', '👍')}
+        {!isPicking && button('handover', isFullHandover ? '⤓' : 'H')}
       </Box>
     )
   })

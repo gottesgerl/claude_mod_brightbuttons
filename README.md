@@ -68,17 +68,20 @@ In the band:
 
 | Path | Opens in |
 | --- | --- |
-| Folder | Directory Opus where installed (Windows: jumps to the folder and brings the window forward), else the system's file manager |
-| Image or video (png, jpg, webp, bmp, gif, tif, exr, hdr, tga, dpx, mp4, mov, mkv, avi, webm, m4v, mxf) | Chaos Player where installed (Windows), else the default app |
+| Folder | the program set for folders, else the system's file manager |
+| Image or video (png, jpg, webp, bmp, gif, tif, exr, hdr, tga, dpx, mp4, mov, mkv, avi, webm, m4v, mxf) | the program set for images and videos, else the default app |
+| 3D file (glb, gltf, fbx, obj, usd, usda, usdc, usdz, abc, stl, ply, 3mf, dae, blend) | the program set for 3D files, else the default app |
 | `.md`, `.txt` | a pane in Claude, markdown rendered |
 | everything else | the system's default app (`explorer` on Windows, `open` on macOS, `xdg-open` on Linux) |
 
 ### Settings
 
 `/bright-buttons` opens the settings pane:
-- **Programs** for folders and for images and videos: the full path of a program (on macOS an `.app` works too). Empty means automatic, as in the table above.
+- **Programs** for folders, for images and videos and for 3D files: the full path of a program (on macOS an `.app` works too). Empty means the system's default app. Directory Opus and the Chaos Player, where installed, are named below as paths to copy. Directory Opus is set with its `dopusrt.exe`; the folder then opens in a tab (an existing one if open) and the window comes forward.
 - **Previews** of images and videos on or off.
 - **Symbols** for file types on or off (off: dots only).
+- **Room for the hover text**: the columns kept for the hovered file name (and for handoff-button's hint), 18 at first.
+- With `handoff-button`: its settings too (compact when idle, language).
 
 The settings are kept across sessions.
 
@@ -92,16 +95,22 @@ Notes:
 
 ## handoff-button
 
-Four buttons on the right of the band above the prompt. Hovering shows a short hint on the left of the band, where `bright-buttons` shows a file name. A right click sets each button's option.
+Three buttons on the right of the band above the prompt and a thumb at its left end. Hovering shows a short hint right of the thumb, where `bright-buttons` shows a file name. A right click sets each button's option.
 
 | Button | Left click | Right click |
 | --- | --- | --- |
-| `⌾` | runs `/advisor` with the chosen model (Opus at first) | shows `Opus Sonnet Haiku` beside it; a pick turns the advisor on with that model and stays chosen |
-| `C` | runs `/compact` at once, without asking | turns compact when idle on or off: 10 minutes after a reply, with nothing new typed, the chat is compacted if its context is at least half full; while on, the `C` is red |
+| `⌾` | runs `/advisor` with the chosen model (Opus at first) | shows `Fable Opus Sonnet Haiku` in the band, the other buttons out of the way; a pick turns the advisor on with that model for this chat |
+| `C` | runs `/compact` at once, without asking | turns compact when idle on or off for this chat: after a reply, with nothing new typed for 10 minutes, the chat is compacted if its context is at least half full; while on, the `C` is a red outline on its grey field |
 | `H` | sends "Bitte schreib ein Handover." as if you had typed it | switches to full handover mode: the button shows `⤓`; another right click switches back |
-| thumb | sends "Yes, please" as if you had typed it | – |
+| thumb | sends "Yes, please" in the chosen language, as if you had typed it | opens the settings |
+
+When the band gets narrow, the thumb goes first.
 
 The advisor model and compact when idle are set per chat: a new chat starts with Opus and without compact when idle. The handover mode stays from chat to chat. Claude Code's own auto-compact setting is left alone.
+
+A right click on the thumb or `/handoff-button` opens the settings (with `bright-buttons` its settings pane, which holds both mods' settings; without it a pane of its own):
+- compact when idle: the minutes and the percent of context,
+- the language, a list with small flags: English, Español, 中文, Français, Українська, 日本語, 한국어, Deutsch. For now it sets what the thumb sends.
 
 In full handover mode the `⤓` button:
 1. exports the chat as `.txt` and `.pdf` to `Documents\Claude Handoffs`,

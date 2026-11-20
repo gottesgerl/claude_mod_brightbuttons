@@ -159,12 +159,43 @@ async function resolvePlatform($: Engine) {
 const tempFile = (name: string) => TEMP + sepOf(TEMP) + name
 
 // The person's choices from the settings pane, kept across sessions in the plugin's store.
-// An empty program means automatic: Directory Opus and the Chaos Player where installed
-// (Windows), else the system's own app.
-type Settings = { folderApp: string; mediaApp: string; previews: boolean; symbols: boolean }
-const DEFAULTS: Settings = { folderApp: '', mediaApp: '', previews: true, symbols: true }
+// An empty program means the system's own app. textRoom: the columns kept for the hovered name
+// (and handoff-button's hint). The idle figures and the language belong to handoff-button; set here,
+// they go to it through $.state, left out it keeps its own.
+type Settings = {
+  folderApp: string
+  mediaApp: string
+  threeDApp: string
+  previews: boolean
+  symbols: boolean
+  textRoom: number
+  idleMinutes?: number
+  idlePercent?: number
+  language?: string
+}
+const DEFAULTS: Settings = { folderApp: '', mediaApp: '', threeDApp: '', previews: true, symbols: true, textRoom: 18 }
 let settings: Settings = { ...DEFAULTS }
 let isSettingsLoaded = false
+// Whether the shared values went out to $.state in this session (it keeps nothing between sessions).
+let isShared = false
+const SHARED = { plugin: 'bright-buttons', key: 'shared' } as const
+const HANDOFF = { plugin: 'handoff-button', key: 'settings' } as const
+
+async function share($: Engine) {
+  isShared = true
+  const { textRoom, idleMinutes, idlePercent, language } = settings
+  try {
+    // Plain JSON: a value not set is left out, not undefined.
+    await $.state.set(SHARED, {
+      textRoom,
+      ...(idleMinutes === undefined ? {} : { idleMinutes }),
+      ...(idlePercent === undefined ? {} : { idlePercent }),
+      ...(language === undefined ? {} : { language }),
+    })
+  } catch {
+    isShared = false
+  }
+}
 
 async function loadSettings($: Engine) {
   if (isSettingsLoaded) {
@@ -182,15 +213,30 @@ async function loadSettings($: Engine) {
 async function saveSettings($: Engine, change: Partial<Settings>) {
   settings = { ...settings, ...change }
   await $.store.set('settings', settings)
+  await share($)
   $.ui.invalidate('ui.render')
 }
 
-// Folders go to Directory Opus, images and videos to the Chaos Player, the rest to the
-// system's default app. Each falls back to the default app when not installed.
+// A whole number typed in the pane, kept when it lies in [least, most].
+async function saveNumber($: Engine, field: 'textRoom' | 'idleMinutes' | 'idlePercent', text: string) {
+  const ranges = { textRoom: [8, 80], idleMinutes: [1, 600], idlePercent: [1, 100] } as const
+  const [least, most] = ranges[field]
+  const value = Math.round(Number(text.trim()))
+  if (!Number.isFinite(value) || value < least || value > most) {
+    $.ui.toast(least + ' to ' + most + ', please.')
+    return
+  }
+  await saveSettings($, { [field]: value })
+}
+
+// Where installed, Directory Opus, the Chaos Player and F3D are only named in the settings pane, as
+// paths to copy: every kind opens in the system's default app until a program is set.
 const OPUS_SUBPATH = '\\GPSoftware\\Directory Opus\\dopusrt.exe'
 const CHAOS_SUBPATH = '\\Chaos\\Player\\chaosplayer_qt5.exe'
+const F3D_SUBPATH = '\\F3D\\bin\\f3d.exe'
 let OPUS = ''
 let CHAOS_PLAYER = ''
+let F3D = ''
 let isResolved = false
 
 // Looked up once per load in the Program Files folders of this machine: no install path is baked in.
@@ -209,6 +255,9 @@ async function resolvePrograms($: Engine) {
   ]
   const roots = candidates.filter((root, i): root is string => root !== undefined && candidates.indexOf(root) === i)
   for (const root of roots) {
+    if (F3D === '' && (await $.fs.exists(root + F3D_SUBPATH))) {
+      F3D = root + F3D_SUBPATH
+    }
     if (OPUS === '' && (await $.fs.exists(root + OPUS_SUBPATH))) {
       OPUS = root + OPUS_SUBPATH
     }
@@ -269,6 +318,8 @@ if ($null -ne $target) { [OpusWin]::Front($target); "front" } else { "no lister"
 `
 
 const MEDIA = /\.(png|jpe?g|webp|bmp|gif|tiff?|exr|hdr|tga|dpx|mp4|mov|mkv|avi|webm|m4v|mxf)$/i
+// 3D files: scenes and meshes a viewer shows.
+const MODEL3D = /\.(glb|gltf|fbx|obj|usd|usda|usdc|usdz|abc|stl|ply|3mf|dae|blend)$/i
 
 // Text files (TEXT, above) show in a pane of this chat instead of an outside app.
 const VIEWER = 'bright-buttons-viewer'
@@ -305,6 +356,31 @@ function openDefault(path: string) {
   return platform === 'windows' ? ['explorer.exe', path] : platform === 'mac' ? ['open', path] : ['xdg-open', path]
 }
 
+// A program set by its bare name (f3d.exe): the full path of one found on this computer by that
+// name, else where Windows finds it on the PATH, else the name as it is.
+async function programOf($: Engine, program: string) {
+  if (program === '' || /[\\/]/.test(program)) {
+    return program
+  }
+  const wanted = program.toLowerCase().replace(/\.exe$/, '')
+  const known = [OPUS, CHAOS_PLAYER, F3D].find(full => full !== '' && nameOf(full).toLowerCase().replace(/\.exe$/, '') === wanted)
+  if (known !== undefined) {
+    return known
+  }
+  if (platform === 'windows') {
+    try {
+      const ran = await $.process.run(['where.exe', program], { timeoutMs: 5000 })
+      const first = ran.stdout.split(/\r?\n/)[0]?.trim() ?? ''
+      if (ran.exitCode === 0 && first !== '') {
+        return first
+      }
+    } catch {
+      // not found: the name as it is
+    }
+  }
+  return program
+}
+
 async function open($: Engine, path: string) {
   await resolvePlatform($)
   await loadSettings($)
@@ -328,25 +404,29 @@ async function open($: Engine, path: string) {
     return
   }
   await resolvePrograms($)
+  const folderApp = await programOf($, settings.folderApp)
+  const mediaApp = await programOf($, settings.mediaApp)
+  const threeDApp = await programOf($, settings.threeDApp)
   let command = openDefault(path)
-  if (isFolder && settings.folderApp !== '') {
-    command = launch(settings.folderApp, path)
-  } else if (!isFolder && MEDIA.test(path) && settings.mediaApp !== '') {
-    command = launch(settings.mediaApp, path)
-  } else if (isFolder && OPUS !== '') {
-    // dopusrt talks to the running Opus: jump to the folder in a tab (an existing one if open).
-    command = [OPUS, '/cmd', 'Go', path, 'NEWTAB=findexisting']
-  } else if (!isFolder && MEDIA.test(path) && CHAOS_PLAYER !== '') {
-    command = launch(CHAOS_PLAYER, path)
+  // Directory Opus set for folders (its dopusrt.exe): jump to the folder in a tab, an existing one if open.
+  const isOpus = isFolder && /dopusrt\.exe$/i.test(folderApp)
+  if (isOpus) {
+    command = [folderApp, '/cmd', 'Go', path, 'NEWTAB=findexisting']
+  } else if (isFolder && folderApp !== '') {
+    command = launch(folderApp, path)
+  } else if (!isFolder && MEDIA.test(path) && mediaApp !== '') {
+    command = launch(mediaApp, path)
+  } else if (!isFolder && MODEL3D.test(path) && threeDApp !== '') {
+    command = launch(threeDApp, path)
   }
   try {
     const ran = await $.process.run(command)
     // The exit code of a default app or of a launcher that hands over means nothing,
     // but Opus reporting an error is worth seeing.
-    if (command[0] === OPUS && ran.exitCode !== 0) {
+    if (isOpus && ran.exitCode !== 0) {
       $.ui.toast('Directory Opus: exit ' + ran.exitCode + ' ' + ran.stderr.slice(0, 120))
     }
-    if (command[0] === OPUS) {
+    if (isOpus) {
       // Go switches the tab but leaves the window where it was: bring it forward.
       const script = tempFile('bright-buttons-focus-opus.ps1')
       await $.fs.write(script, FOCUS_OPUS)
@@ -372,10 +452,12 @@ const FRAMES = ['#e0303a', '#f5821f', '#3cb44b', '#3a78d8', '#f2c40f', '#8e44ad'
 
 // Flat symbols for the band in the path's colour, on a 24 x 24 grid; holes are cut, so any background shows through.
 const ICON_DRAWN = 22
-// The room kept at the band's left for the hovered file name (columns), so it never gets squeezed out.
-const TEXT_ROOM = 18
+// The room kept at the band's left for the hovered file name (columns), so it never gets squeezed
+// out: settings.textRoom.
 // Columns kept for what other mods put in the band beside the paths (handoff-button's four buttons).
 const OTHERS_ROOM = 30
+// The columns handoff-button's thumb takes at the band's left end, with its gap.
+const THUMB_ROOM = 6
 // Where the estimates fall short, the name gives way, down to this many columns.
 const NAME_LEAST = 8
 // About how many pixels a column of the band is wide in the desktop app.
@@ -584,6 +666,61 @@ let repliesSeen = -1
 // While the middle button is held: how many the band skipped at the press.
 let grabbedAt: number | undefined
 
+// handoff-button's part of the settings pane: compact when idle and the language (a list of flags).
+// A value set here wins over handoff-button's own; until then its own shows.
+let isChoosingLanguage = false
+type HandoffValues = { idleMinutes: number; idlePercent: number; language: string; languages: { id: string; name: string; flag: string; yes: string }[] }
+function handoffSettings($: Engine, ui: any, handoff: HandoffValues) {
+  const { Box, Text, Input, Button, Svg } = ui
+  const minutes = settings.idleMinutes ?? handoff.idleMinutes
+  const percent = settings.idlePercent ?? handoff.idlePercent
+  const languages = handoff.languages
+  const now = languages.find(one => one.id === (settings.language ?? handoff.language)) ?? languages[0]
+  const flag = (one: { id: string; name: string; flag: string }) => Svg === undefined
+    ? undefined
+    : <Svg key={'flag-' + one.id} source={one.flag} alt={one.name} width={21} height={14} />
+  return (
+    <Box key="handoff-settings" flexDirection="column" gap="sm">
+      <Text bold>Handoff buttons</Text>
+      <Text dimColor>Compact when idle (right click on C, per chat): after a reply, with nothing new for this long, the chat is compacted if its context is this full. Enter saves.</Text>
+      <Input
+        key="idleMinutes"
+        label="Minutes: "
+        value={String(minutes)}
+        submitLabel="save"
+        onSubmit={(value: string) => void saveNumber($, 'idleMinutes', value)}
+      />
+      <Input
+        key="idlePercent"
+        label="Context at least (%): "
+        value={String(percent)}
+        submitLabel="save"
+        onSubmit={(value: string) => void saveNumber($, 'idlePercent', value)}
+      />
+      {now !== undefined && <Text dimColor>Language: for now, what the thumb sends.</Text>}
+      {now !== undefined && (
+        <Box key="language-now" flexDirection="row" alignItems="center" gap="sm">
+          {flag(now)}
+          <Button key="language-open" plain label={now.name + (isChoosingLanguage ? '  ▴' : '  ▾')} onPress={() => {
+            isChoosingLanguage = !isChoosingLanguage
+            $.ui.invalidate('ui.render')
+          }} />
+        </Box>
+      )}
+      {now !== undefined && isChoosingLanguage && languages.map(one => (
+        <Box key={'language-' + one.id} flexDirection="row" alignItems="center" gap="sm" marginLeft="md">
+          {flag(one)}
+          <Button key={'pick-' + one.id} plain dimColor={one.id !== now.id} label={one.name} onPress={() => {
+            isChoosingLanguage = false
+            $.clock.after(0, () => void saveSettings($, { language: one.id }))
+          }} />
+        </Box>
+      ))}
+      {now !== undefined && <Text dimColor>{'The thumb sends: ' + now.yes}</Text>}
+    </Box>
+  )
+}
+
 // The path under the pointer in the band, if any: its file name shows dim beside the buttons.
 let hovered: string | undefined
 // A short note after a right click copied a path; it stands where the hovered name would.
@@ -592,7 +729,9 @@ let copiedNote: string | undefined
 export const register: Register = on => {
   // /bright-buttons opens the settings pane.
   on('session.start', async ($, e, next) => {
-    await $.command.register({ name: 'bright-buttons', description: 'Settings of the bright buttons: programs, previews, symbols' })
+    await $.command.register({ name: 'bright-buttons', description: 'Settings of the bright buttons (and the handoff buttons): programs, band, compact when idle, language' })
+    await loadSettings($)
+    await share($)
     return next(e)
   })
 
@@ -608,34 +747,35 @@ export const register: Register = on => {
     await resolvePlatform($)
     await loadSettings($)
     await resolvePrograms($)
-    const { Box, Text, Input, Select } = $.ui.resolve(e) as any
+    const ui = $.ui.resolve(e) as any
+    const { Box, Text, Input, Select, Button, Svg } = ui
     const systemApp = platform === 'mac' ? 'Finder / default app' : platform === 'linux' ? 'default app (xdg-open)' : 'Explorer / default app'
-    const autoFolder = OPUS !== '' ? 'Directory Opus (found)' : systemApp
-    const autoMedia = CHAOS_PLAYER !== '' ? 'Chaos Player (found)' : systemApp
     const onOff = [
       { value: 'on', label: 'on' },
       { value: 'off', label: 'off' },
     ]
+    // handoff-button's own values and languages, if it runs: its part of the pane shows then.
+    const { value: handoff, version } = await $.state.get(HANDOFF)
+    const isHandoff = version > 0 && handoff !== undefined
+    const program = (key: 'folderApp' | 'mediaApp' | 'threeDApp', label: string) => (
+      <Input
+        key={key}
+        label={label}
+        value={settings[key]}
+        placeholder={systemApp}
+        submitLabel="save"
+        onSubmit={(value: string) => void saveSettings($, { [key]: value.trim() })}
+      />
+    )
+    const found = [OPUS !== '' ? 'Directory Opus: ' + OPUS : '', CHAOS_PLAYER !== '' ? 'Chaos Player: ' + CHAOS_PLAYER : '', F3D !== '' ? 'F3D: ' + F3D : ''].filter(line => line !== '')
     return (
       <Box flexDirection="column" gap="sm">
         <Text bold>Programs</Text>
-        <Text dimColor>The full path of a program, Enter saves. Empty: automatic.</Text>
-        <Input
-          key="folderApp"
-          label="Folders: "
-          value={settings.folderApp}
-          placeholder={'automatic: ' + autoFolder}
-          submitLabel="save"
-          onSubmit={(value: string) => void saveSettings($, { folderApp: value.trim() })}
-        />
-        <Input
-          key="mediaApp"
-          label="Images and videos: "
-          value={settings.mediaApp}
-          placeholder={'automatic: ' + autoMedia}
-          submitLabel="save"
-          onSubmit={(value: string) => void saveSettings($, { mediaApp: value.trim() })}
-        />
+        <Text dimColor>The full path of a program (or the name of one found below), Enter saves. Empty: the system's default app.</Text>
+        {program('folderApp', 'Folders: ')}
+        {program('mediaApp', 'Images and videos: ')}
+        {program('threeDApp', '3D files (glb, fbx, obj, usd, abc ...): ')}
+        {found.length > 0 && <Text dimColor>{'Found on this computer: ' + found.join(' · ')}</Text>}
         <Text dimColor>Markdown and text files open in a pane of this chat; everything else in the system's default app.</Text>
         <Text bold>Band</Text>
         <Select
@@ -652,6 +792,14 @@ export const register: Register = on => {
           value={settings.symbols ? 'on' : 'off'}
           onSelect={(value: string) => void saveSettings($, { symbols: value === 'on' })}
         />
+        <Input
+          key="textRoom"
+          label="Room for the hover text (characters, at least): "
+          value={String(settings.textRoom)}
+          submitLabel="save"
+          onSubmit={(value: string) => void saveNumber($, 'textRoom', value)}
+        />
+        {isHandoff && handoffSettings($, ui, handoff)}
         <Text dimColor>{'System: ' + (platform === '' ? 'unknown' : platform) + (base === '' ? '' : ' · project: ' + base)}</Text>
       </Box>
     )
@@ -775,6 +923,10 @@ export const register: Register = on => {
     const below = await next(e)
     await syncBase($)
     await loadSettings($)
+    if (!isShared) {
+      isShared = true
+      $.clock.after(0, () => void share($))
+    }
     const messages = await $.session.messages()
     // Every path of the chat, newest reply first (at most a few hundred); the band shows seven of
     // them, newest on the left, from where a middle-button drag has moved it.
@@ -797,7 +949,7 @@ export const register: Register = on => {
     // As many paths as fit beside the room kept for the name: a narrow band shows fewer,
     // the oldest of the seven left out, so nothing pushes the name past the band's left edge.
     const fitting = (from: number) => {
-      let room = (e.props.bodyColumns ?? 200) - TEXT_ROOM - OTHERS_ROOM - (from > 0 ? 6 : 0)
+      let room = (e.props.bodyColumns ?? 200) - settings.textRoom - OTHERS_ROOM - (from > 0 ? 6 : 0)
       let count = 0
       for (const path of all.slice(from, from + MAX_BUTTONS)) {
         room -= columnsOf(path)
@@ -891,11 +1043,14 @@ export const register: Register = on => {
       paths.reduce((sum, path) => sum + columnsOf(path), 0)
     // All the room left of the buttons, so the name starts at the band's left end; where that
     // is more than there is, the box shrinks to fit.
-    const nameWidth = Math.max(TEXT_ROOM, leftOver + 12)
+    // handoff-button's thumb stands at the band's left end (from 64 columns on): the name leaves it room.
+    const { version: handoffVersion } = await $.state.get(HANDOFF)
+    const thumbRoom = handoffVersion > 0 && (e.props.bodyColumns ?? 200) >= 64 ? THUMB_ROOM : 0
+    const nameWidth = Math.max(settings.textRoom, leftOver + 12 - thumbRoom)
     const buttons = (
       <Box justifyContent="flex-end" alignItems="center">
         {/* The hovered name left of the buttons, as wide as the band has room for (the paths shown
-            leave at least TEXT_ROOM); one line only, a long name cut in the middle. */}
+            leave at least settings.textRoom); one line only, a long name cut in the middle. */}
         {name !== '' && (
           <Box key="hovered-name" width={nameWidth} flexShrink={1} minWidth={NAME_LEAST} marginRight="md">
             <Text dimColor wrap="truncate-middle">{name}</Text>
