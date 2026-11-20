@@ -1,8 +1,0 @@
-{
-  "name": "handoff-button",
-  "version": "0.9.0",
-  "description": "⌾: /advisor with the chosen model (right click: pick Fable, Opus, Sonnet or Haiku for this chat). C: /compact now (right click: compact when idle for this chat; the C turns into a red outline). H: asks for a handover (right click: full handover mode, shown as ⤓: compact, rename to [A], start chat [B] with the handover, archive the old one). Thumb at the band's left end: sends \"Yes, please\" in the chosen language. /handoff-button or a right click on the thumb (with bright-buttons: its settings pane) sets the idle minutes and percent and the language. A short hint shows on hover.",
-  "author": {
-    "name": "gottesgerl"
-  }
-}

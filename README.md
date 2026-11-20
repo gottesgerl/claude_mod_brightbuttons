@@ -1,13 +1,12 @@
-# Claude Code mods by gottesgerl
+# bright-buttons, a Claude Code mod by gottesgerl
 
-Two mods for Claude Code (desktop app and terminal) that together form a band above the prompt.
+A band above the prompt for Claude Code (desktop app and terminal):
 
-| Mod | What it does |
-| --- | --- |
-| `bright-buttons` | A coloured button per path from the latest replies, a small preview for images and videos. Left click opens, right click copies the path. Windows, macOS and Linux. |
-| `handoff-button` | `⌾` runs `/advisor` with the chosen model, `C` runs `/compact` (or compacts by itself when idle), `H` asks for a handover; in full handover mode (`⤓`) it exports the chat, renames it `[A]`, starts a new chat `[B]` with the handover and archives the old one. A thumb types "Yes, please". A right click sets each button's option. Lays the `bright-buttons` row beside its own. Windows. |
+- a coloured button per path from the latest replies, a small preview for images and videos; left click opens, right click copies the path (Windows, macOS and Linux),
+- a thumb at the band's left end that types "Yes, please",
+- `⌾` for `/advisor`, `C` for `/compact` with the prompt cache's time filling it, `H` asking for a handover (Windows for the full handover).
 
-Each mod works on its own. With both, the coloured buttons stand left of the H.
+Each of the thumb, `⌾`, `C` and `H` can be switched off in the settings. Until version 0.10 the buttons on the right were a mod of their own, `handoff-button`; it is now part of `bright-buttons`.
 
 ## Installation
 
@@ -16,20 +15,20 @@ In a terminal (Claude Code must be installed):
 ```
 claude plugin marketplace add gottesgerl/claude_mod_brightbuttons
 claude plugin install bright-buttons@bright-buttons
-claude plugin install handoff-button@bright-buttons
 ```
 
-Then restart Claude. The mods run in every new session, the desktop app included.
+Then restart Claude. The mod runs in every new session, the desktop app included.
 
 Updating to a new version:
 
 ```
 claude plugin marketplace update bright-buttons
 claude plugin update bright-buttons
-claude plugin update handoff-button
 ```
 
-If you also load a mod as a folder under `~/.claude/mods/` (`CLAUDE_CODE_PLUGIN_DIRS` in `~/.claude/settings.json`), remove that entry, or the mod runs twice.
+If `handoff-button` is still installed from an earlier version, remove it (`claude plugin uninstall handoff-button`), or its buttons show twice.
+
+If you also load the mod as a folder under `~/.claude/mods/` (`CLAUDE_CODE_PLUGIN_DIRS` in `~/.claude/settings.json`), remove that entry, or the mod runs twice.
 
 ### Let Claude write the paths in full
 
@@ -80,8 +79,13 @@ In the band:
 - **Programs** for folders, for images and videos and for 3D files: the full path of a program (on macOS an `.app` works too). Empty means the system's default app. Directory Opus and the Chaos Player, where installed, are named below as paths to copy. Directory Opus is set with its `dopusrt.exe`; the folder then opens in a tab (an existing one if open) and the window comes forward.
 - **Previews** of images and videos on or off.
 - **Symbols** for file types on or off (off: dots only).
-- **Room for the hover text**: the columns kept for the hovered file name (and for handoff-button's hint), 18 at first.
-- With `handoff-button`: its settings too (compact when idle, language).
+- **Room for the hover text**: the columns kept for the hovered file name and the buttons' hint, 18 at first.
+- **Buttons**: the thumb, `⌾`, `C` and `H`, each on or off.
+- **Read from Claude**: fills in what Claude's own settings hold (`advisorModel`, `language`) and shows whether Claude's auto-compact is on and at what share of the context. Mods cannot read the prompt cache's time, so the cache minutes stay as they are.
+- **Advisor model for new chats** (Opus at first).
+- **Compact when idle**: the minutes and the percent of context.
+- **Cache minutes**: how long the prompt cache holds after a reply (60 at first); the `C`'s grey field empties over this time. This sets only the display, not Claude's prompt cache.
+- **Language**, a list with small flags: English, Español, 中文, Français, Українська, 日本語, 한국어, Deutsch. For now it sets what the thumb sends.
 
 The settings are kept across sessions.
 
@@ -93,25 +97,22 @@ Notes:
 - Paths are found as `C:\...` or `C:/...` (Windows), `/Users/...`, `/home/...`, `/Volumes/...`, `/mnt/...` and other usual top folders, and `~/...`. In backticks any absolute path counts. Paths with spaces are found only in backticks.
 - To bring Directory Opus forward, a small PowerShell script is written to the temp folder (`bright-buttons-focus-opus.ps1`).
 
-## handoff-button
+## Thumb, ⌾, C and H
 
-Three buttons on the right of the band above the prompt and a thumb at its left end. Hovering shows a short hint right of the thumb, where `bright-buttons` shows a file name. A right click sets each button's option.
+Three buttons on the right of the band and a thumb at its left end. Hovering shows a short hint right of the thumb, where a hovered file name shows too. A right click sets each button's option.
 
 | Button | Left click | Right click |
 | --- | --- | --- |
-| `⌾` | runs `/advisor` with the chosen model (Opus at first) | shows `Fable Opus Sonnet Haiku` in the band, the other buttons out of the way; a pick turns the advisor on with that model for this chat |
-| `C` | runs `/compact` at once, without asking | turns compact when idle on or off for this chat: after a reply, with nothing new typed for 60 minutes (a setting), the chat is compacted if its context is at least half full; while on, the `C` is a red outline on its grey field. Its grey field doubles as an abstract hourglass: the part of the prompt cache's time (an hour at first, a setting) still left fills it from the bottom a shade darker (the hint names the minutes) |
+| `⌾` | runs `/advisor` with the chosen model (the settings' advisor model at first) | shows `Fable Opus Sonnet Haiku` in the band, the other buttons out of the way; a pick turns the advisor on with that model for this chat |
+| `C` | runs `/compact` at once, without asking | turns compact when idle on or off for this chat: after a reply, with nothing new typed for 60 minutes (a setting), the chat is compacted if its context is at least half full; while on, the `C` is a red outline on its grey field. Its grey field doubles as an abstract hourglass: the part of the prompt cache's time (an hour at first, a setting) still left fills it from the bottom in the grey of the other buttons (the hint names the minutes) |
 | `H` | sends "Bitte schreib ein Handover." as if you had typed it | switches to full handover mode: the button shows `⤓`; another right click switches back |
 | thumb | sends "Yes, please" in the chosen language, as if you had typed it | opens the settings |
 
 When the band gets narrow, the thumb goes first.
 
-The advisor model and compact when idle are set per chat: a new chat starts with Opus and without compact when idle. The handover mode stays from chat to chat. Claude Code's own auto-compact setting is left alone.
+The advisor model and compact when idle are set per chat: a new chat starts with the settings' advisor model and without compact when idle. The handover mode stays from chat to chat. Claude Code's own auto-compact setting is left alone.
 
-A right click on the thumb or `/handoff-button` opens the settings (with `bright-buttons` its settings pane, which holds both mods' settings; without it a pane of its own):
-- compact when idle: the minutes and the percent of context,
-- cache minutes: how long the prompt cache holds after a reply (60 at first); the `C`'s grey field empties over this time,
-- the language, a list with small flags: English, Español, 中文, Français, Українська, 日本語, 한국어, Deutsch. For now it sets what the thumb sends.
+A right click on the thumb or `/bright-buttons` opens the settings.
 
 In full handover mode the `⤓` button:
 1. exports the chat as `.txt` and `.pdf` to `Documents\Claude Handoffs`,
@@ -122,5 +123,3 @@ In full handover mode the `⤓` button:
 While a reply runs, `H` waits until it is done. If `C` does not work, a short message appears.
 
 `/import-chat` loads an exported chat into the current chat. The PDF is made by Microsoft Edge in the background; without Edge there is no PDF.
-
-Since Claude Code 2.1.325 every mod gets its own row in the band; `handoff-button` lays the rows side by side again.

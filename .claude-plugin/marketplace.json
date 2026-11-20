@@ -1,9 +1,13 @@
 {
   "name": "bright-buttons",
-  "description": "Claude Code mods: coloured buttons for the paths in replies with previews, and a handoff button for switching chats.",
-  "owner": { "name": "gottesgerl" },
+  "description": "Claude Code mod: coloured buttons for the paths in replies with previews, plus thumb, advisor, compact and handover buttons.",
+  "owner": {
+    "name": "gottesgerl"
+  },
   "plugins": [
-    { "name": "bright-buttons", "source": "./plugins/bright-buttons" },
-    { "name": "handoff-button", "source": "./plugins/handoff-button" }
+    {
+      "name": "bright-buttons",
+      "source": "./plugins/bright-buttons"
+    }
   ]
 }
