@@ -100,7 +100,7 @@ Three buttons on the right of the band above the prompt and a thumb at its left 
 | Button | Left click | Right click |
 | --- | --- | --- |
 | `⌾` | runs `/advisor` with the chosen model (Opus at first) | shows `Fable Opus Sonnet Haiku` in the band, the other buttons out of the way; a pick turns the advisor on with that model for this chat |
-| `C` | runs `/compact` at once, without asking | turns compact when idle on or off for this chat: after a reply, with nothing new typed for 10 minutes, the chat is compacted if its context is at least half full; while on, the `C` is a red outline on its grey field |
+| `C` | runs `/compact` at once, without asking | turns compact when idle on or off for this chat: after a reply, with nothing new typed for 60 minutes (a setting), the chat is compacted if its context is at least half full; while on, the `C` is a red outline on its grey field. Its grey field doubles as an abstract hourglass: the part of the prompt cache's time (an hour at first, a setting) still left fills it from the bottom a shade darker (the hint names the minutes) |
 | `H` | sends "Bitte schreib ein Handover." as if you had typed it | switches to full handover mode: the button shows `⤓`; another right click switches back |
 | thumb | sends "Yes, please" in the chosen language, as if you had typed it | opens the settings |
 
@@ -110,6 +110,7 @@ The advisor model and compact when idle are set per chat: a new chat starts with
 
 A right click on the thumb or `/handoff-button` opens the settings (with `bright-buttons` its settings pane, which holds both mods' settings; without it a pane of its own):
 - compact when idle: the minutes and the percent of context,
+- cache minutes: how long the prompt cache holds after a reply (60 at first); the `C`'s grey field empties over this time,
 - the language, a list with small flags: English, Español, 中文, Français, Українська, 日本語, 한국어, Deutsch. For now it sets what the thumb sends.
 
 In full handover mode the `⤓` button:

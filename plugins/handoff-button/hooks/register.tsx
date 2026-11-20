@@ -347,7 +347,7 @@ let chatLoaded = ''
 // compacted if its context is at least idlePercent full. The API's cache has run out by then,
 // so the next message would read the whole chat anew anyway; compacted, it starts small.
 // Both figures are settings (the settings pane), for every chat alike.
-let idleMinutes = 10
+let idleMinutes = 60
 let idlePercent = 50
 let isIdleCompact = false
 let isTurnRunning = false
@@ -395,7 +395,7 @@ function hintText(id: ButtonId) {
     return 'Advisor (' + MODEL_NAMES[advisorModel] + ')'
   }
   if (id === 'compact') {
-    return isIdleCompact ? 'Compact (when idle)' : 'Compact'
+    return (isIdleCompact ? 'Compact (when idle)' : 'Compact') + (minutesShown > 0 ? ' · cache ' + minutesShown + ' min' : '')
   }
   if (id === 'yes') {
     return yesText()
@@ -423,8 +423,11 @@ async function loadState($: Engine) {
     isFullHandover = (await $.store.get('full-handover')) === true
     const minutes = Number(await $.store.get('idle-minutes'))
     const percent = Number(await $.store.get('idle-percent'))
-    ownMinutes = Number.isFinite(minutes) && minutes >= 1 ? minutes : 10
+    ownMinutes = Number.isFinite(minutes) && minutes >= 1 ? minutes : 60
     ownPercent = Number.isFinite(percent) && percent >= 1 && percent <= 100 ? percent : 50
+    const cache = Number(await $.store.get('cache-minutes'))
+    ownCache = Number.isFinite(cache) && cache >= 1 ? cache : 60
+    cacheMinutes = ownCache
     const stored = (await $.store.get('language')) as Language | undefined
     ownLanguage = stored !== undefined && LANGUAGES.includes(stored) ? stored : 'en'
     idleMinutes = ownMinutes
@@ -449,8 +452,9 @@ async function loadState($: Engine) {
 // values and languages, and takes the values set there ($.state, for the session).
 const SHARED = { plugin: 'bright-buttons', key: 'shared' } as const
 const OWN = { plugin: 'handoff-button', key: 'settings' } as const
-let ownMinutes = 10
+let ownMinutes = 60
 let ownPercent = 50
+let ownCache = 60
 let ownLanguage: Language = 'en'
 let isPublished = false
 let isBrightHere = false
@@ -461,6 +465,7 @@ async function publish($: Engine) {
     await $.state.set(OWN, {
       idleMinutes: ownMinutes,
       idlePercent: ownPercent,
+      cacheMinutes: ownCache,
       language: ownLanguage,
       languages: LANGUAGES.map(id => ({ id, name: LANGUAGE_NAMES[id], flag: FLAGS[id], yes: YES[id] })),
     })
@@ -471,7 +476,7 @@ async function publish($: Engine) {
 
 // The values in force: bright-buttons' where it set them, else our own.
 async function readShared($: Engine) {
-  let shared: { textRoom?: number; idleMinutes?: number; idlePercent?: number; language?: string } | undefined
+  let shared: { textRoom?: number; idleMinutes?: number; idlePercent?: number; cacheMinutes?: number; language?: string } | undefined
   try {
     const read = await $.state.get(SHARED)
     shared = read.version > 0 ? read.value : undefined
@@ -482,6 +487,7 @@ async function readShared($: Engine) {
   const lang = shared?.language as Language | undefined
   idleMinutes = shared?.idleMinutes ?? ownMinutes
   idlePercent = shared?.idlePercent ?? ownPercent
+  cacheMinutes = shared?.cacheMinutes ?? ownCache
   language = lang !== undefined && LANGUAGES.includes(lang) ? lang : ownLanguage
   hintRoom = shared?.textRoom ?? 18
 }
@@ -501,6 +507,67 @@ function openSettings($: Engine) {
     await $.ui.open({ id: SETTINGS_PANE, title: 'Handoff buttons' })
   })
 }
+
+// How long the prompt cache still holds: it lasts an hour from the end of the chat's last reply.
+// The minutes left stand dim right of C; one timer a minute draws them again while any are left.
+// How long the cache holds (minutes): a setting, an hour at first.
+let cacheMinutes = 60
+const cacheFrom = new Map<string, number>()
+let isTicking = false
+
+function tick($: Engine) {
+  if (isTicking) {
+    return
+  }
+  isTicking = true
+  $.clock.after(60 * 1000, async () => {
+    isTicking = false
+    $.ui.invalidate('ui.render')
+    const now = await $.clock.now()
+    if ([...cacheFrom.values()].some(from => now - from < cacheMinutes * 60000)) {
+      tick($)
+    }
+  })
+}
+
+async function cacheLeft($: Engine, id: string) {
+  if (!cacheFrom.has(id)) {
+    const stored = Number(await $.store.get('cache-from:' + id))
+    cacheFrom.set(id, Number.isFinite(stored) ? stored : 0)
+  }
+  const left = (cacheFrom.get(id) ?? 0) + cacheMinutes * 60000 - (await $.clock.now())
+  return left > 0 ? Math.ceil(left / 60000) : 0
+}
+
+// The cache's hour as an abstract hourglass in C's grey field: the part still left fills it from the
+// bottom a shade darker, sinking as the minutes run out.
+// The whole C button is one drawing: an empty field with a thin frame, the cache's hour filling it
+// from the bottom in the grey of the other buttons, and the C (red outline when compact when idle
+// is on). Size and greys as measured on the app's light theme (H: 30 x 28); tune here.
+const C_FIELD_W = 30
+const C_FIELD_H = 28
+const C_FIELD_R = 6
+const C_FIELD_GREY = '#e7e7e7'
+const C_LETTER_GREY = '#5c5c5c'
+const C_RED_PATH = 'M18.16 6.34 A8 8 0 1 0 18.16 17.66 L15.75 15.25 A4.6 4.6 0 1 1 15.75 8.75 Z'
+function cField(minutes: number, isRed: boolean) {
+  const w = C_FIELD_W
+  const h = C_FIELD_H
+  const left = Math.max(0, Math.min(cacheMinutes, minutes)) / cacheMinutes
+  const top = (h * (1 - left)).toFixed(2)
+  const glyph = isRed
+    ? '<g transform="translate(' + ((w - 16) / 2) + ' ' + ((h - 16) / 2) + ') scale(0.6667)"><path fill="none" stroke="#e5484d" ' +
+      'stroke-width="1.6" stroke-linejoin="round" d="' + C_RED_PATH + '"/></g>'
+    : '<text x="' + (w / 2) + '" y="' + (h / 2) + '" text-anchor="middle" dominant-baseline="central" ' +
+      'font-family="Segoe UI, system-ui, -apple-system, sans-serif" font-size="14" fill="' + C_LETTER_GREY + '">C</text>'
+  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + w + ' ' + h + '">' +
+    '<defs><clipPath id="field"><rect width="' + w + '" height="' + h + '" rx="' + C_FIELD_R + '"/></clipPath></defs>' +
+    (left > 0 ? '<rect y="' + top + '" width="' + w + '" height="' + h + '" fill="' + C_FIELD_GREY + '" clip-path="url(#field)"/>' : '') +
+    '<rect x="0.5" y="0.5" width="' + (w - 1) + '" height="' + (h - 1) + '" rx="' + (C_FIELD_R - 0.5) + '" fill="none" stroke="' +
+    C_FIELD_GREY + '" stroke-width="1"/>' +
+    glyph + '</svg>'
+}
+let minutesShown = 0
 
 function stopIdle() {
   idleTimer?.cancel()
@@ -551,14 +618,18 @@ async function sayYes($: Engine) {
   }
 }
 
-async function saveIdle($: Engine, field: 'minutes' | 'percent', text: string) {
+async function saveIdle($: Engine, field: 'minutes' | 'percent' | 'cache', text: string) {
   const value = Math.round(Number(text.trim()))
-  const isOk = field === 'minutes' ? value >= 1 && value <= 600 : value >= 1 && value <= 100
+  const isOk = field === 'percent' ? value >= 1 && value <= 100 : value >= 1 && value <= 600
   if (!Number.isFinite(value) || !isOk) {
-    $.ui.toast(field === 'minutes' ? 'Minutes: 1 to 600.' : 'Percent: 1 to 100.')
+    $.ui.toast(field === 'percent' ? 'Percent: 1 to 100.' : 'Minutes: 1 to 600.')
     return
   }
-  if (field === 'minutes') {
+  if (field === 'cache') {
+    ownCache = value
+    cacheMinutes = value
+    await $.store.set('cache-minutes', value)
+  } else if (field === 'minutes') {
     ownMinutes = value
     idleMinutes = value
     await $.store.set('idle-minutes', value)
@@ -607,6 +678,14 @@ function settingsOf($: Engine, ui: any) {
         submitLabel="save"
         onSubmit={(value: string) => void saveIdle($, 'percent', value)}
       />
+      <Text dimColor>Cache: how long the prompt cache holds after a reply; C's grey field empties over this time.</Text>
+      <Input
+        key="cacheMinutes"
+        label="Cache minutes: "
+        value={String(cacheMinutes)}
+        submitLabel="save"
+        onSubmit={(value: string) => void saveIdle($, 'cache', value)}
+      />
       <Text dimColor>Language: for now, what the thumb sends.</Text>
       <Box key="language-now" flexDirection="row" alignItems="center" gap="sm">
         {flag(language)}
@@ -633,7 +712,7 @@ function settingsOf($: Engine, ui: any) {
 // Without regions, plain buttons.
 // A drawing on a button (the red C) keeps the button's grey field: the button stands under it with a
 // blank label of a letter's width, the drawing centred on top.
-function buttonOf($: Engine, ui: any, id: ButtonId, label: string, drawing?: string, isOnField = false) {
+function buttonOf($: Engine, ui: any, id: ButtonId, label: string, drawing?: string, isOnField = false, size = THUMB_DRAWN, height = size) {
   const { Box, Button, Svg, Client } = ui
   const isDrawn = drawing !== undefined && Svg !== undefined && Client !== undefined
   const press = () => {
@@ -642,7 +721,7 @@ function buttonOf($: Engine, ui: any, id: ButtonId, label: string, drawing?: str
   return (
     <Box key={'wrap-' + id} position="relative" flexShrink={0}>
       {isDrawn && !isOnField ? (
-        <Svg key={'look-' + id} source={drawing} alt={label} width={THUMB_DRAWN} height={THUMB_DRAWN} />
+        <Svg key={'look-' + id} source={drawing} alt={label} width={size} height={height} />
       ) : (
         <Button key={id} label={isDrawn ? ' ' : label} dimColor onPress={press} />
       )}
@@ -749,6 +828,11 @@ export const register: Register = on => {
       await loadState($)
       await readShared($)
       startIdle($)
+      const chat = await $.session.id()
+      const now = await $.clock.now()
+      cacheFrom.set(chat, now)
+      await $.store.set('cache-from:' + chat, now)
+      tick($)
     }
     return next(e)
   })
@@ -906,6 +990,11 @@ export const register: Register = on => {
 
     await loadState($)
     await readShared($)
+    const minutesLeft = e.props.isWorking ? 0 : await cacheLeft($, id)
+    minutesShown = minutesLeft
+    if (minutesLeft > 0) {
+      $.clock.after(0, () => tick($))
+    }
     if (!isPublished) {
       isPublished = true
       $.clock.after(0, () => void publish($))
@@ -932,8 +1021,8 @@ export const register: Register = on => {
           }} />
         ))}
         {button('advisor', '⌾')}
-        {/* Compact when idle on: an outlined C in red. */}
-        {!isPicking && buttonOf($, ui, 'compact', 'C', isIdleCompact ? C_RED : undefined, true)}
+        {/* Compact when idle on: an outlined C in red. The cache's hour fills its field from the bottom. */}
+        {!isPicking && buttonOf($, ui, 'compact', 'C', cField(minutesLeft, isIdleCompact), false, C_FIELD_W, C_FIELD_H)}
         {/* Full handover mode: ⤓ in place of H. */}
         {!isPicking && button('handover', isFullHandover ? '⤓' : 'H')}
       </Box>

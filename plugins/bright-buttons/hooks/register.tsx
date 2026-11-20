@@ -171,6 +171,7 @@ type Settings = {
   textRoom: number
   idleMinutes?: number
   idlePercent?: number
+  cacheMinutes?: number
   language?: string
 }
 const DEFAULTS: Settings = { folderApp: '', mediaApp: '', threeDApp: '', previews: true, symbols: true, textRoom: 18 }
@@ -183,13 +184,14 @@ const HANDOFF = { plugin: 'handoff-button', key: 'settings' } as const
 
 async function share($: Engine) {
   isShared = true
-  const { textRoom, idleMinutes, idlePercent, language } = settings
+  const { textRoom, idleMinutes, idlePercent, cacheMinutes, language } = settings
   try {
     // Plain JSON: a value not set is left out, not undefined.
     await $.state.set(SHARED, {
       textRoom,
       ...(idleMinutes === undefined ? {} : { idleMinutes }),
       ...(idlePercent === undefined ? {} : { idlePercent }),
+      ...(cacheMinutes === undefined ? {} : { cacheMinutes }),
       ...(language === undefined ? {} : { language }),
     })
   } catch {
@@ -218,8 +220,8 @@ async function saveSettings($: Engine, change: Partial<Settings>) {
 }
 
 // A whole number typed in the pane, kept when it lies in [least, most].
-async function saveNumber($: Engine, field: 'textRoom' | 'idleMinutes' | 'idlePercent', text: string) {
-  const ranges = { textRoom: [8, 80], idleMinutes: [1, 600], idlePercent: [1, 100] } as const
+async function saveNumber($: Engine, field: 'textRoom' | 'idleMinutes' | 'idlePercent' | 'cacheMinutes', text: string) {
+  const ranges = { textRoom: [8, 80], idleMinutes: [1, 600], idlePercent: [1, 100], cacheMinutes: [1, 600] } as const
   const [least, most] = ranges[field]
   const value = Math.round(Number(text.trim()))
   if (!Number.isFinite(value) || value < least || value > most) {
@@ -454,7 +456,7 @@ const FRAMES = ['#e0303a', '#f5821f', '#3cb44b', '#3a78d8', '#f2c40f', '#8e44ad'
 const ICON_DRAWN = 22
 // The room kept at the band's left for the hovered file name (columns), so it never gets squeezed
 // out: settings.textRoom.
-// Columns kept for what other mods put in the band beside the paths (handoff-button's four buttons).
+// Columns kept for what other mods put in the band beside the paths (handoff-button's buttons).
 const OTHERS_ROOM = 30
 // The columns handoff-button's thumb takes at the band's left end, with its gap.
 const THUMB_ROOM = 6
@@ -669,11 +671,12 @@ let grabbedAt: number | undefined
 // handoff-button's part of the settings pane: compact when idle and the language (a list of flags).
 // A value set here wins over handoff-button's own; until then its own shows.
 let isChoosingLanguage = false
-type HandoffValues = { idleMinutes: number; idlePercent: number; language: string; languages: { id: string; name: string; flag: string; yes: string }[] }
+type HandoffValues = { idleMinutes: number; idlePercent: number; cacheMinutes?: number; language: string; languages: { id: string; name: string; flag: string; yes: string }[] }
 function handoffSettings($: Engine, ui: any, handoff: HandoffValues) {
   const { Box, Text, Input, Button, Svg } = ui
   const minutes = settings.idleMinutes ?? handoff.idleMinutes
   const percent = settings.idlePercent ?? handoff.idlePercent
+  const cache = settings.cacheMinutes ?? handoff.cacheMinutes ?? 60
   const languages = handoff.languages
   const now = languages.find(one => one.id === (settings.language ?? handoff.language)) ?? languages[0]
   const flag = (one: { id: string; name: string; flag: string }) => Svg === undefined
@@ -696,6 +699,14 @@ function handoffSettings($: Engine, ui: any, handoff: HandoffValues) {
         value={String(percent)}
         submitLabel="save"
         onSubmit={(value: string) => void saveNumber($, 'idlePercent', value)}
+      />
+      <Text dimColor>Cache: how long the prompt cache holds after a reply; C's grey field empties over this time.</Text>
+      <Input
+        key="cacheMinutes"
+        label="Cache minutes: "
+        value={String(cache)}
+        submitLabel="save"
+        onSubmit={(value: string) => void saveNumber($, 'cacheMinutes', value)}
       />
       {now !== undefined && <Text dimColor>Language: for now, what the thumb sends.</Text>}
       {now !== undefined && (
