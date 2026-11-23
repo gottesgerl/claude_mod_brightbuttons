@@ -69,7 +69,7 @@ In the band:
 | --- | --- |
 | Folder | the program set for folders, else the system's file manager |
 | Image or video (png, jpg, webp, bmp, gif, tif, exr, hdr, tga, dpx, mp4, mov, mkv, avi, webm, m4v, mxf) | the program set for images and videos, else the default app |
-| 3D file (glb, gltf, fbx, obj, usd, usda, usdc, usdz, abc, stl, ply, 3mf, dae, blend) | the program set for 3D files, else the default app |
+| 3D file (glb, gltf, fbx, obj, usd, usda, usdc, usdz, abc, stl, ply, 3mf, dae) | the program set for 3D files, else the default app. Scene files (.blend, .hip) always open in the default app, usually Blender and Houdini |
 | `.md`, `.txt` | a pane in Claude, markdown rendered |
 | everything else | the system's default app (`explorer` on Windows, `open` on macOS, `xdg-open` on Linux) |
 

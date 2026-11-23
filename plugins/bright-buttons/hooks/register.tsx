@@ -1502,8 +1502,8 @@ if ($null -ne $target) { [OpusWin]::Front($target); "front" } else { "no lister"
 `
 
 const MEDIA = /\.(png|jpe?g|webp|bmp|gif|tiff?|exr|hdr|tga|dpx|mp4|mov|mkv|avi|webm|m4v|mxf)$/i
-// 3D files: scenes and meshes a viewer shows.
-const MODEL3D = /\.(glb|gltf|fbx|obj|usd|usda|usdc|usdz|abc|stl|ply|3mf|dae|blend)$/i
+// 3D files: meshes and exchange formats a viewer shows. Scene files (.blend, .hip) open in their own program (the system's default app: Blender, Houdini).
+const MODEL3D = /\.(glb|gltf|fbx|obj|usd|usda|usdc|usdz|abc|stl|ply|3mf|dae)$/i
 
 // Text files (TEXT, above) show in a pane of this chat instead of an outside app.
 const VIEWER = 'bright-buttons-viewer'
