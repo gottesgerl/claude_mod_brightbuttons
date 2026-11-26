@@ -39,10 +39,34 @@ const textOf = (result: { content: { type: string; text?: string }[] }) =>
 
 let isRunning = false
 let logText = ''
-let pendingHandoff: string | undefined
 type Back = { id: string; title: string; path: string; pdf?: string }
 
-let pendingBack: Omit<Back, 'id'> | undefined
+// The handoff waiting for the cleared chat. It sits in the store (and as a file beside the export),
+// not in memory: the app may end the process instead of clearing it, and memory goes with it. The
+// next start of the chat (SessionStart, a /clear, or the first band drawn) takes it, once.
+const PENDING = 'pending-handoff'
+const PENDING_MAX_MS = 12 * 60 * 60 * 1000
+type Pending = { title: string; text: string; back: Back; at: number }
+let pendingChecked = ''
+
+// The pending handoff if it is meant for a chat titled title (or any chat on a /clear), and
+// removed from the store, so it goes in once.
+async function takePending($: Engine, title: string | undefined, isClear: boolean) {
+  const pending = (await $.store.get(PENDING)) as Pending | null | undefined
+  if (pending === undefined || pending === null) {
+    return undefined
+  }
+  if (Date.now() - pending.at > PENDING_MAX_MS) {
+    await $.store.delete(PENDING)
+    await log($, 'pending handoff too old, dropped')
+    return undefined
+  }
+  if (!isClear && title !== pending.title) {
+    return undefined
+  }
+  await $.store.delete(PENDING)
+  return pending
+}
 let backTo: Back | undefined
 let backFor = ''
 
@@ -257,23 +281,27 @@ async function handoff($: Engine, isWorking: boolean) {
 
     // 3. Rename, then clear; the handoff goes in once the cleared chat is up.
     await $.mcp.call(SESSIONS, 'set_session_title', { session_id: 'self', title: newTitle })
-    pendingBack = { title: oldTitle, path, pdf }
-    pendingHandoff =
-      `Handoff aus dem vorherigen Chat "${oldTitle}" (voller Verlauf: ${path}):\n\n${summary}\n\n` +
+    const summaryPath = EXPORT_DIR + '\\' + fileName.replace(/\.txt$/, '.handoff.md')
+    await $.fs.write(summaryPath, `# Handoff aus "${oldTitle}"\n\n${summary}\n`)
+    const text =
+      `Handoff aus dem vorherigen Chat "${oldTitle}" (voller Verlauf: ${path}, Uebergabe: ${summaryPath}):\n\n${summary}\n\n` +
       'Nutze diese Uebergabe als Kontext und mach bei der naechsten Nachricht genau da weiter.'
-    await log($, 'title ok, clearing')
+    const pending: Pending = { title: newTitle, text, back: { id: await $.session.id(), title: oldTitle, path, pdf }, at: Date.now() }
+    await $.store.set(PENDING, pending)
+    await log($, 'title ok, handoff stored (' + summaryPath + '), clearing')
+    // /clear first, as if typed: it clears now and fires session.end 'clear'. The app's clear_session
+    // waits for a turn to end, and outside one the app only ends the process, the chat left as it was.
     let isCleared = false
     try {
-      const cleared = await $.mcp.call(SESSIONS, 'clear_session', { session_id: 'self' })
-      isCleared = !cleared.isError
-      await log($, 'clear_session: ' + textOf(cleared).slice(0, 200))
+      const ran = await $.command.run({ command: 'clear' })
+      isCleared = true
+      await log($, 'clear ran: ' + JSON.stringify(ran).slice(0, 200))
     } catch (error) {
-      await log($, 'clear_session refused: ' + String(error).slice(0, 300))
+      await log($, '/clear refused: ' + String(error).slice(0, 300))
     }
     if (!isCleared) {
-      await log($, 'fallback: running /clear')
-      const ran = await $.command.run({ command: 'clear' })
-      await log($, 'clear ran: ' + JSON.stringify(ran).slice(0, 200))
+      const cleared = await $.mcp.call(SESSIONS, 'clear_session', { session_id: 'self' })
+      await log($, 'fallback clear_session: ' + textOf(cleared).slice(0, 200))
     }
   } catch (error) {
     isRunning = false
@@ -969,11 +997,56 @@ function handoffMessage($: Engine, data: { action?: string; id?: string } | unde
   return true
 }
 
+// Hands the pending handoff to a chat that is up and still empty, when its title is the handoff's.
+async function deliverLate($: Engine, id: string) {
+  try {
+    if ((await $.session.messages()).length > 0) {
+      return
+    }
+    const info = await $.mcp.call(SESSIONS, 'get_session', { session_id: 'self' })
+    let title: string | undefined
+    try {
+      title = JSON.parse(textOf(info)).title
+    } catch {
+      // no title, no match
+    }
+    const pending = await takePending($, title, false)
+    if (pending === undefined) {
+      return
+    }
+    await givePending($, pending, id)
+  } catch (error) {
+    await log($, 'late handoff error: ' + String(error))
+  }
+}
+
+// Puts the handoff in as a user row the model reads but the chat does not show, and links back.
+async function givePending($: Engine, pending: Pending, id: string) {
+  isRunning = false
+  await $.store.set('back:' + id, pending.back)
+  backFor = ''
+  await log($, 'back link: ' + id + ' -> ' + pending.back.id)
+  const appended = await $.session.append({
+    message: { type: 'user', content: [{ type: 'text', text: pending.text }] },
+  })
+  if ('deny' in appended && appended.deny !== undefined) {
+    await log($, 'append denied: ' + appended.deny + ', submitting instead')
+    void $.prompt.submit({ text: pending.text })
+  } else {
+    await log($, 'handoff appended')
+  }
+  $.ui.invalidate('ui.render')
+}
+
 // The band: the thumb and the hint at the left end, then middle (the path buttons), then ⌾, the cache
 // and the context button, each as the settings show it.
 async function handoffBand($: Engine, e: any, ui: any, middle: any) {
   const { Box, Button, Text } = ui
   const id = await $.session.id()
+  if (pendingChecked !== id) {
+    pendingChecked = id
+    $.clock.after(0, () => void deliverLate($, id))
+  }
   if (backFor !== id) {
     backFor = id
     backTo = (await $.store.get('back:' + id)) as typeof backTo
@@ -1124,33 +1197,35 @@ function registerHandoff(on: Parameters<Register>[0]) {
   })
 
   on('session.end', ($, e, next) => {
-    if (e.reason === 'clear' && pendingHandoff !== undefined) {
-      const text = pendingHandoff
-      const back = pendingBack === undefined ? undefined : { ...pendingBack, id: e.sessionId }
-      pendingHandoff = undefined
-      pendingBack = undefined
+    if (e.reason === 'clear') {
       $.clock.after(AFTER_CLEAR_MS, async () => {
         isRunning = false
-        if (back !== undefined) {
-          const newId = await $.session.id()
-          await $.store.set('back:' + newId, back)
-          await log($, 'back link: ' + newId + ' -> ' + back.id)
-          $.ui.invalidate('ui.render')
-        }
-        // A user row the model reads but the chat does not show as a message.
-        const appended = await $.session.append({
-          message: { type: 'user', content: [{ type: 'text', text }] },
-        })
-        if ('deny' in appended && appended.deny !== undefined) {
-          await log($, 'append denied: ' + appended.deny + ', submitting instead')
-          void $.prompt.submit({ text })
-        } else {
-          await log($, 'handoff appended')
+        const pending = await takePending($, undefined, true)
+        if (pending !== undefined) {
+          await givePending($, pending, await $.session.id())
         }
       })
     }
 
     return next(e)
+  })
+
+  // A chat that starts again after the handoff (the app ended its process instead of clearing it):
+  // the handoff goes in as context of the start, and the band links back.
+  on('classic.SessionStart', async ($, e, next) => {
+    const result = await next(e)
+    try {
+      const pending = await takePending($, e.session_title, e.source === 'clear')
+      if (pending === undefined) {
+        return result
+      }
+      await $.store.set('back:' + e.session_id, pending.back)
+      await log($, 'session start (' + e.source + '): handoff as context, back link ' + e.session_id + ' -> ' + pending.back.id)
+      return { ...result, additionalContext: [...(result.additionalContext ?? []), pending.text] }
+    } catch (error) {
+      await log($, 'session start handoff error: ' + String(error))
+      return result
+    }
   })
 }
 

@@ -118,8 +118,8 @@ A right click on the thumb or `/bright-buttons` opens the settings.
 
 In full handover mode the `⤓` button:
 1. exports the chat as `.txt` and `.pdf` to `Documents\Claude Handoffs`,
-2. has a handover written,
-3. renames the chat `… [A]`, clears it and starts it as `… [B]` with the handover,
+2. has a handover written and saves it as `….handoff.md` beside the export,
+3. renames the chat `… [A]`, clears it with `/clear` and starts it as `… [B]` with the handover (kept on disk until the new chat has it, so a restarted chat still gets it),
 4. shows a `<<` button in the new chat that opens the old chat's PDF.
 
 While a reply runs, `H` and `⤓` wait until it is done. If `/compact` does not work, a short message appears.
