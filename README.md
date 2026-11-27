@@ -60,10 +60,10 @@ The buttons show the paths of the latest replies, newest on the left, at most se
 
 In the band:
 - **Images and videos** show as a small, pale black-and-white preview with rounded corners and a bar in their colour at top and bottom. Videos show their frame at one second. The preview is made by `ffmpeg` (looked for in `Program Files\ffmpeg\bin` on Windows, in `/opt/homebrew/bin`, `/usr/local/bin` and `/usr/bin` elsewhere, else on the PATH) as a small JPEG in the temp folder. Without ffmpeg, or until the preview is ready, a symbol stands in.
-- **Symbols** in the path's colour: Blender logo (`.blend`), spiral (Houdini `.hip`, `.hda`, `.otl`), `>` (Python and scripts: `.py`, `.ps1`, `.sh`, `.bat`, `.js`, `.ts`, `.tsx`), tree slice (`.log`), gear (data and settings: `.json`, `.yaml`, `.xml`, `.ini`, `.ocio`), wire cube (3D: `.usd`, `.glb`, `.fbx`, `.obj`, `.abc`), page (`.pdf`), network in a disc (models: `.safetensors`, `.ckpt`, `.pt`, `.gguf`, `.onnx`), `#` (spreadsheets: `.xlsx`, `.xls`, `.xlsm`, `.xlsb`, `.csv`, `.tsv`, `.ods`), `//` (`.html`, `.htm`, `.xhtml`), two lines (`.md`, `.txt`), folder, film reel (video, until its preview is ready). Other files keep their dot.
+- **Symbols** in the path's colour: Blender logo (`.blend`), spiral (Houdini `.hip`, `.hda`, `.otl`), `{ }` (Python and scripts: `.py`, `.ps1`, `.sh`, `.bat`, `.js`, `.ts`, `.tsx`), tree slice (`.log`), gear (data and settings: `.json`, `.yaml`, `.xml`, `.ini`, `.ocio`), wire cube (3D: `.usd`, `.glb`, `.fbx`, `.obj`, `.abc`), page (`.pdf`), network in a disc (models: `.safetensors`, `.ckpt`, `.pt`, `.gguf`, `.onnx`), `#` (spreadsheets: `.xlsx`, `.xls`, `.xlsm`, `.xlsb`, `.csv`, `.tsv`, `.ods`), `//` (`.html`, `.htm`, `.xhtml`), two lines (`.md`, `.txt`), folder, film reel (video, until its preview is ready). Other files keep their dot.
 - **Left click** opens the path, **right click** copies the full path to the clipboard ("Path copied" shows for a moment).
 - **Hovering** shows the file name dimmed left of the buttons; a narrow band shows fewer paths so the name keeps its room.
-- **Older paths:** hold the middle mouse button over a path and drag left for older paths of the chat, right for newer ones While older paths show, a grey hand and a dim `+N` count the newer paths left out. A new reply brings the band back to the newest.
+- **Older paths:** a small `›` right of the buttons moves the band one path older per click, a `‹` left of them one path newer; under each arrow stands how many paths lie that way, and the arrows show only where there are some. After each step a thin bar under the paths shows for a moment which part of all paths is in view. Holding the middle mouse button over a path and dragging sideways moves the band too. A new reply brings the band back to the newest.
 
 | Path | Opens in |
 | --- | --- |
@@ -100,7 +100,7 @@ Notes:
 
 ## Thumb, ⌾, custom, cache and context
 
-Four buttons on the right of the band and a thumb at its left end. Hovering shows a short hint right of the thumb, where a hovered file name shows too. A right click sets each button's option.
+Four buttons on the right of the band and a thumb at its left end. Hovering shows a short hint right of the thumb, where a hovered file name shows too. A right click sets each button's option. A middle click on the cache button turns auto-renew on or off, on the context button it steps to the next mode (Compact, Handover, Handover & New Chat), both without the menu.
 
 | Button | Left click | Right click |
 | --- | --- | --- |

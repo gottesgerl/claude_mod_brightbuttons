@@ -610,6 +610,7 @@ async function cacheLeft($: Engine, id: string) {
 // their automatic (auto-renew, compact when idle) is on.
 // Cache: the time still left fills the field from the bottom, an abstract hourglass; run out, the
 // symbol turns pale with a small "zz" (the cache sleeps). The symbol: an ice lolly in hairlines that melts.
+// While a reply runs the cache is being written anew: the field is full and the ice whole.
 // Context: the context still free fills the field from the bottom (its top sinks as the chat grows);
 // its letter (the mode) takes a colour once the context is this full (percent).
 const C_FIELD_W = 30
@@ -689,14 +690,24 @@ const CONTEXT_DRAWINGS: Partial<Record<ContextMode, string>> = {
     'A1.2 1.2 0 0 1 11.5 4.4 V11.2 V5.2 A1.2 1.2 0 0 1 13.9 5.2 V11.6 V7.6 A1.2 1.2 0 0 1 16.3 7.6 V14.8 C16.3 18.6 14.6 21.4 11.6 21.4 Z"/>',
   next: '<path d="M12 3C12.6 8.2 13.8 9.4 19 10C13.8 10.6 12.6 11.8 12 17C11.4 11.8 10.2 10.6 5 10C10.2 9.4 11.4 8.2 12 3Z"/><path d="M18.5 15.5V20.5M16 18H21"/>',
 }
-function contextField(contextPercent: number, isIdle: boolean, mode: ContextMode) {
+// The tokens in the context window, in thousands rounded down (114,342 shows as 114), small and grey under
+// the symbol; the symbol moves up and shrinks to make room.
+const C_TOKENS_GREY = '#7a7a7a'
+function contextField(contextPercent: number, isIdle: boolean, mode: ContextMode, tokens?: number) {
   const fill = CONTEXT_FILLS.find(([least]) => contextPercent >= least)?.[1] ?? C_FIELD_GREY
   const drawing = CONTEXT_DRAWINGS[mode]
-  const symbol = drawing !== undefined
-    ? '<g transform="translate(' + (C_FIELD_W / 2 - 9.6) + ' ' + (C_FIELD_H / 2 - 10) + ') scale(0.8)" fill="none" stroke="' + C_LETTER_GREY +
-      '" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round">' + drawing + '</g>'
+  const hasTokens = tokens !== undefined && tokens > 0
+  const scale = hasTokens ? 0.62 : 0.8
+  const top = hasTokens ? 1.6 : C_FIELD_H / 2 - 10
+  const symbol = (drawing !== undefined
+    ? '<g transform="translate(' + (C_FIELD_W / 2 - 12 * scale) + ' ' + top + ') scale(' + scale + ')" fill="none" stroke="' + C_LETTER_GREY +
+      '" stroke-width="' + (hasTokens ? 1.3 : 1.1) + '" stroke-linecap="round" stroke-linejoin="round">' + drawing + '</g>'
     : '<text x="' + (C_FIELD_W / 2) + '" y="' + (C_FIELD_H / 2) + '" text-anchor="middle" dominant-baseline="central" ' +
-      'font-family="Segoe UI, system-ui, -apple-system, sans-serif" font-size="14" fill="' + C_LETTER_GREY + '">' + CONTEXT_LETTERS[mode] + '</text>'
+      'font-family="Segoe UI, system-ui, -apple-system, sans-serif" font-size="14" fill="' + C_LETTER_GREY + '">' + CONTEXT_LETTERS[mode] + '</text>') +
+    (hasTokens
+      ? '<text x="' + (C_FIELD_W / 2) + '" y="' + (C_FIELD_H - 2.2) + '" text-anchor="middle" font-family="Segoe UI, system-ui, -apple-system, sans-serif" ' +
+        'font-size="7.5" fill="' + C_TOKENS_GREY + '">' + Math.floor(tokens / 1000) + '</text>'
+      : '')
   return fieldOf('contextfield', 1 - contextPercent / 100, symbol, isIdle, fill)
 }
 
@@ -704,12 +715,16 @@ let minutesShown = 0
 let isExpiredShown = false
 // How full the context is (percent) per chat, read after each reply and the first time a chat shows.
 const contextOf = new Map<string, number>()
+// The tokens in the context window per chat, read with the percent.
+const tokensOf = new Map<string, number>()
 async function readContext($: Engine, id: string) {
   try {
     const { context } = await $.session.usage()
     const percent = context.percent ?? (context.tokens === undefined ? 0 : Math.round(100 * context.tokens / context.window))
-    if (contextOf.get(id) !== percent) {
+    const tokens = context.tokens ?? (context.percent === undefined ? 0 : Math.round(context.percent * context.window / 100))
+    if (contextOf.get(id) !== percent || Math.floor((tokensOf.get(id) ?? 0) / 1000) !== Math.floor(tokens / 1000)) {
       contextOf.set(id, percent)
+      tokensOf.set(id, tokens)
       $.ui.invalidate('ui.render')
     }
   } catch {
@@ -991,6 +1006,18 @@ async function rightClick($: Engine, id: ButtonId) {
   $.ui.invalidate('ui.render')
 }
 
+// A middle click steps through a button's modes without the menu: the cache's auto-renew on and off,
+// the context's modes in the menu's order.
+async function middleClick($: Engine, id: ButtonId) {
+  if (id === 'compact') {
+    await toggleAutoRenew($)
+    $.ui.invalidate('ui.render')
+  } else if (id === 'handover') {
+    const at = SHOWN_MODES.indexOf(contextMode)
+    await pickContextMode($, SHOWN_MODES[(at + 1) % SHOWN_MODES.length] ?? 'handover')
+  }
+}
+
 async function pressButton($: Engine, id: ButtonId) {
   if (id === 'back') {
     if (lastBack !== undefined) {
@@ -1039,6 +1066,8 @@ function handoffMessage($: Engine, data: { action?: string; id?: string } | unde
     $.clock.after(0, () => void pressButton($, id))
   } else if (data?.action === 'menu') {
     $.clock.after(0, () => void rightClick($, id))
+  } else if (data?.action === 'cycle') {
+    $.clock.after(0, () => void middleClick($, id))
   } else if (data?.action === 'enter' || data?.action === 'leave') {
     const nextHint = data.action === 'enter' ? id : hint === id ? undefined : hint
     if (nextHint !== hint) {
@@ -1145,7 +1174,7 @@ async function handoffBand($: Engine, e: any, ui: any, middle: any) {
       {cfg.advisor && !isContextMenu && button('advisor', '⌾')}
       {!isMenu && settings.custom && buttonOf($, ui, 'custom', settings.customName.trim() || 'Custom',
         customField(customIcon(), isCustomStarting), false, C_FIELD_W, C_FIELD_H)}
-      {!isMenu && cfg.compact && buttonOf($, ui, 'compact', 'Cache', cacheField(minutesLeft, isAutoRenew, isExpired), false, C_FIELD_W, C_FIELD_H)}
+      {!isMenu && cfg.compact && buttonOf($, ui, 'compact', 'Cache', cacheField(e.props.isWorking && cfg.compact ? cfg.cacheMinutes : minutesLeft, isAutoRenew, isExpired), false, C_FIELD_W, C_FIELD_H)}
       {/* After a right click on the context button: its modes, the chosen one at full strength, and the
           compact-when-idle switch. */}
       {isContextMenu && SHOWN_MODES.map(mode => (
@@ -1159,7 +1188,7 @@ async function handoffBand($: Engine, e: any, ui: any, middle: any) {
           <Text dimColor={!isIdleCompact} wrap="truncate-end">Idle compact</Text>
         </Box>
       )}
-      {!isPicking && cfg.handover && buttonOf($, ui, 'handover', CONTEXT_LETTERS[contextMode], contextField(contextOf.get(id) ?? 0, isIdleCompact, contextMode), false, C_FIELD_W, C_FIELD_H)}
+      {!isPicking && cfg.handover && buttonOf($, ui, 'handover', CONTEXT_LETTERS[contextMode], contextField(contextOf.get(id) ?? 0, isIdleCompact, contextMode, tokensOf.get(id)), false, C_FIELD_W, C_FIELD_H)}
     </Box>
   )
 }
@@ -1782,11 +1811,6 @@ function columnsOf(path: string) {
   const width = (THUMB_DRAWN * thumb.width) / Math.max(1, thumb.height)
   return Math.ceil((width + 6) / COLUMN_PIXELS)
 }
-// A grey open hand, shown while the band shows older paths.
-const HAND =
-  '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">' +
-  '<path fill="none" stroke="#9a9a9a" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round" ' +
-  'd="M7.6 21.4 C6.2 20.2 5.2 18.4 4.6 16.6 L2.7 12.9 A1.25 1.25 0 0 1 4.9 11.7 L6.7 14.3 V6.2 A1.2 1.2 0 0 1 9.1 6.2 V11.2 V4.4 A1.2 1.2 0 0 1 11.5 4.4 V11.2 V5.2 A1.2 1.2 0 0 1 13.9 5.2 V11.6 V7.6 A1.2 1.2 0 0 1 16.3 7.6 V14.8 C16.3 18.6 14.6 21.4 11.6 21.4 Z"/></svg>'
 // A disc in the colour with a sign cut out of it, so the background shows through the sign.
 const disc = (colour: string, cut: string) =>
   `<mask id="cut"><rect width="24" height="24" fill="#fff"/><g fill="#000" stroke="#000">${cut}</g></mask>` +
@@ -1810,10 +1834,12 @@ const ICONS: { test: (path: string) => boolean; draw: (colour: string) => string
       `<circle cx="12" cy="12.5" r="9" fill="${c}" mask="url(#spiral)"/>`,
   },
   {
-    // A Python or other script: a single prompt sign.
+    // A Python or other script: curly braces (a single > looked like the band's page arrow).
     test: path => /\.(pyw?|ps1|psm1|sh|bat|cmd|js|mjs|cjs|ts|tsx|jsx)$/i.test(path),
     draw: c =>
-      `<path d="M8.5 7 L15.5 13 L8.5 19" fill="none" stroke="${c}" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>`,
+      `<g fill="none" stroke="${c}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">` +
+      '<path d="M9.5 5 C7 5 7 6.5 7 8.5 V10.5 C7 11.6 6.2 12.5 5 12.5 C6.2 12.5 7 13.4 7 14.5 V16.5 C7 18.5 7 20 9.5 20"/>' +
+      '<path d="M14.5 5 C17 5 17 6.5 17 8.5 V10.5 C17 11.6 17.8 12.5 19 12.5 C17.8 12.5 17 13.4 17 14.5 V16.5 C17 18.5 17 20 14.5 20"/></g>',
   },
   {
     // A spreadsheet or table (Excel, CSV, ODS): an upright hash.
@@ -1985,6 +2011,26 @@ async function makeThumbs($: Engine) {
 const DRAG_STEP = 3
 let skipped = 0
 let skippedMax = 0
+// Until when (clock ms) the small position bar under the paths shows: for a moment after each step.
+let barUntil = 0
+const BAR_SHOWS = 1800
+// A step of the band (arrow click or drag) shows the position bar for a moment, then hides it again.
+async function showBar($: Engine) {
+  barUntil = (await $.clock.now()) + BAR_SHOWS
+  $.clock.after(BAR_SHOWS + 50, () => $.ui.invalidate('ui.render'))
+}
+// The page arrows' region paths: never a real path.
+const PAGE_NEWER = 'page-newer'
+const PAGE_OLDER = 'page-older'
+// The columns kept for a page arrow.
+const PAGE_ROOM = 3
+// A page arrow: a small chevron, under it how many paths lie that way, grey like the context's tokens.
+const pageArrow = (isOlder: boolean, count: number) =>
+  '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="22" viewBox="0 0 16 22">' +
+  '<path d="' + (isOlder ? 'M6.2 3.5L9.7 7L6.2 10.5' : 'M9.8 3.5L6.3 7L9.8 10.5') + '" fill="none" stroke="#7a7a7a" stroke-width="1.3" ' +
+  'stroke-linecap="round" stroke-linejoin="round"/>' +
+  '<text x="8" y="19.5" text-anchor="middle" font-family="Segoe UI, system-ui, -apple-system, sans-serif" font-size="7.5" fill="#7a7a7a">' +
+  count + '</text></svg>'
 let repliesSeen = -1
 // While the middle button is held: how many the band skipped at the press.
 let grabbedAt: number | undefined
@@ -2354,6 +2400,19 @@ export const register: Register = on => {
     if (typeof path !== 'string') {
       return next(e)
     }
+    // A left click on a page arrow moves the band by one path; the rest of its posts are dropped
+    // (a middle-button drag over it pages as over a path).
+    if (path === PAGE_NEWER || path === PAGE_OLDER) {
+      if (data?.action === 'open') {
+        skipped = path === PAGE_NEWER ? Math.max(0, skipped - 1) : Math.min(skippedMax, skipped + 1)
+        await showBar($)
+        $.ui.invalidate('ui.render')
+        return {}
+      }
+      if (data?.action !== 'grab' && data?.action !== 'drag' && data?.action !== 'release') {
+        return {}
+      }
+    }
     if (data?.action === 'grab' || data?.action === 'drag') {
       // A drag whose press was not delivered (one post a frame) starts from where the band stands.
       if (data.action === 'grab' || grabbedAt === undefined) {
@@ -2362,6 +2421,9 @@ export const register: Register = on => {
       const steps = data.action === 'drag' ? Math.round(-(data.dx ?? 0) / DRAG_STEP) : 0
       const moved = Math.min(skippedMax, Math.max(0, grabbedAt + steps))
       if (moved !== skipped || data.action === 'grab') {
+        if (moved !== skipped) {
+          await showBar($)
+        }
         skipped = moved
         $.ui.invalidate('ui.render')
       }
@@ -2488,7 +2550,7 @@ export const register: Register = on => {
     // As many paths as fit beside the room kept for the name: a narrow band shows fewer,
     // the oldest of the seven left out, so nothing pushes the name past the band's left edge.
     const fitting = (from: number) => {
-      let room = (e.props.bodyColumns ?? 200) - settings.textRoom - othersRoom() - (from > 0 ? 6 : 0)
+      let room = (e.props.bodyColumns ?? 200) - settings.textRoom - othersRoom() - (from > 0 ? PAGE_ROOM : 0) - (all.length > from + 1 ? PAGE_ROOM : 0)
       let count = 0
       for (const path of all.slice(from, from + MAX_BUTTONS)) {
         room -= columnsOf(path)
@@ -2502,6 +2564,7 @@ export const register: Register = on => {
     skippedMax = Math.max(0, all.length - fitting(0))
     skipped = Math.min(skipped, skippedMax)
     const paths = all.slice(skipped, skipped + fitting(skipped))
+    const olderCount = Math.max(0, all.length - skipped - paths.length)
     if (paths.length === 0) {
       return e.props.hasSurvey || !hasButtons ? next(e) : handoffBand($, e, ui, null)
     }
@@ -2575,16 +2638,47 @@ export const register: Register = on => {
         </Box>
       )
     }
+    const pageOf = (isOlder: boolean, count: number) => {
+      const region = isOlder ? PAGE_OLDER : PAGE_NEWER
+      if (Svg === undefined || Client === undefined) {
+        return (
+          <Button key={region} label={isOlder ? '› ' + count : count + ' ‹'} plain dimColor onPress={() => {
+            skipped = isOlder ? Math.min(skippedMax, skipped + 1) : Math.max(0, skipped - 1)
+            void showBar($)
+            $.ui.invalidate('ui.render')
+          }} />
+        )
+      }
+      return (
+        <Box key={region} position="relative" flexShrink={0} marginLeft="xs" marginRight="xs">
+          <Svg key={region + '-look'} source={pageArrow(isOlder, count)} alt={isOlder ? 'older paths' : 'newer paths'} width={16} height={22} />
+          <Box key={region + '-over'} position="absolute" top={0} left={0} right={0} bottom={0}>
+            <Client key={region + '-hit'} module="./hit.tsx" props={{ path: region, label: ' ' }} width="100%" height="100%" />
+          </Box>
+        </Box>
+      )
+    }
     const name = (copiedNote !== undefined || (hovered !== undefined && paths.includes(hovered)))
       ? (copiedNote ?? (hovered === undefined ? '' : nameOf(hovered)))
       : ''
-    const leftOver = (e.props.bodyColumns ?? 200) - othersRoom() - (skipped > 0 ? 6 : 0) - 3 -
+    const leftOver = (e.props.bodyColumns ?? 200) - othersRoom() - (skipped > 0 ? PAGE_ROOM : 0) - (olderCount > 0 ? PAGE_ROOM : 0) - 3 -
       paths.reduce((sum, path) => sum + columnsOf(path), 0)
     // All the room left of the buttons, so the name starts at the band's left end; where that
     // is more than there is, the box shrinks to fit.
     // The thumb stands at the band's left end (when on, from 64 columns on): the name leaves it room.
     const thumbRoom = thumbFits(e.props.bodyColumns ?? 200) ? THUMB_ROOM : 0
     const nameWidth = Math.max(settings.textRoom, leftOver + 12 - thumbRoom)
+    // The position bar: a thin grey track under the paths with a darker piece for the part shown, the newest
+    // at the left. It shows only for a moment after a step.
+    const isBar = Svg !== undefined && all.length > paths.length && (await $.clock.now()) < barUntil
+    const barWidth = paths.reduce((sum, path) => sum + columnsOf(path), 0) * COLUMN_PIXELS
+    const barSource = () => {
+      const from = (barWidth * skipped) / all.length
+      const width = Math.max(6, (barWidth * paths.length) / all.length)
+      return '<svg xmlns="http://www.w3.org/2000/svg" width="' + barWidth + '" height="3" viewBox="0 0 ' + barWidth + ' 3">' +
+        '<rect y="0.5" width="' + barWidth + '" height="2" rx="1" fill="#e2e2e2"/>' +
+        '<rect x="' + Math.min(from, barWidth - width) + '" y="0" width="' + width + '" height="3" rx="1.5" fill="#7a7a7a"/></svg>'
+    }
     const buttons = (
       <Box justifyContent="flex-end" alignItems="center">
         {/* The hovered name left of the buttons, as wide as the band has room for (the paths shown
@@ -2594,18 +2688,18 @@ export const register: Register = on => {
             <Text dimColor wrap="truncate-middle">{name}</Text>
           </Box>
         )}
-        {/* While the band shows older paths: a grey hand and how many newer ones are left out. */}
-        {skipped > 0 && (
-          <Box key="skipped" marginRight="sm" flexShrink={0} alignItems="center" gap="xs">
-            {Svg !== undefined ? (
-              <Svg key="hand" source={HAND} alt="older paths" width={ICON_DRAWN - 4} height={ICON_DRAWN - 4} />
-            ) : (
-              <Text key="hand">✋</Text>
-            )}
-            <Text key="count" dimColor>{'+' + skipped}</Text>
-          </Box>
-        )}
-        {paths.map(slotOf)}
+        {/* Page arrows: newer paths to the left (the newest stand left), older ones to the right, each with
+            how many lie that way; shown only where there are some. */}
+        {skipped > 0 && pageOf(false, skipped)}
+        <Box key="paths" position="relative" flexShrink={0} alignItems="center">
+          {paths.map(slotOf)}
+          {isBar && (
+            <Box key="bar" position="absolute" left={0} right={0} bottom={-5} alignItems="center" justifyContent="center">
+              <Svg key="bar-look" source={barSource()} alt="position" width={barWidth} height={3} />
+            </Box>
+          )}
+        </Box>
+        {olderCount > 0 && pageOf(true, olderCount)}
       </Box>
     )
     if (e.props.hasSurvey) {
