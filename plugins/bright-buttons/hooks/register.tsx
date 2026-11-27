@@ -189,6 +189,24 @@ async function advisor($: Engine) {
   }
 }
 
+// ↗ button: asks for a handover in a new chat (the global skill handover-next writes the handover,
+// starts the chat one letter up, carries group and pin over and archives this one). The text goes in the
+// prompt box for the person to send with Enter: a prompt a mod submits counts as the mod's, and the app
+// refuses to start a new chat on such a turn.
+const NEXT_PROMPT = 'Handover und neuer Chat (Skill handover-next).'
+async function askNext($: Engine) {
+  try {
+    const filled = await $.prompt.fill({ text: NEXT_PROMPT })
+    if (filled.isFilled) {
+      $.ui.toast('Enter druecken: Handover & New Chat')
+    } else {
+      $.ui.toast('Eingabefeld nicht frei. Tippe: ' + NEXT_PROMPT)
+    }
+  } catch (error) {
+    $.ui.toast('Handover & New Chat ging nicht: ' + String(error).slice(0, 200))
+  }
+}
+
 // H button: asks for a handover, as if the person had typed it. It runs once the chat is idle.
 async function askHandover($: Engine) {
   try {
@@ -377,9 +395,12 @@ let isLoaded = false
 let chatLoaded = ''
 
 // What the context button runs, from chat to chat.
-const CONTEXT_MODES = ['compact', 'handover', 'full'] as const
+const CONTEXT_MODES = ['compact', 'handover', 'full', 'next'] as const
 type ContextMode = (typeof CONTEXT_MODES)[number]
-const CONTEXT_MODE_NAMES: Record<ContextMode, string> = { compact: 'Compact', handover: 'Handover', full: 'Handover, Log & Clear' }
+// The modes the right-click menu offers. 'full' (handover, log & clear) is hidden for now: the code
+// stays, a chat set to it before falls back to 'handover'.
+const SHOWN_MODES: readonly ContextMode[] = ['compact', 'handover', 'next']
+const CONTEXT_MODE_NAMES: Record<ContextMode, string> = { compact: 'Compact', handover: 'Handover', full: 'Handover, Log & Clear', next: 'Handover & New Chat' }
 let contextMode: ContextMode = 'handover'
 let isContextMenu = false
 
@@ -499,9 +520,7 @@ async function loadState($: Engine) {
   if (!isLoaded) {
     isLoaded = true
     const mode = (await $.store.get('context-mode')) as ContextMode | undefined
-    contextMode = mode !== undefined && CONTEXT_MODES.includes(mode)
-      ? mode
-      : (await $.store.get('full-handover')) === true ? 'full' : 'handover'
+    contextMode = mode !== undefined && SHOWN_MODES.includes(mode) ? mode : 'handover'
   }
   const id = await $.session.id()
   if (chatLoaded === id) {
@@ -590,7 +609,7 @@ async function cacheLeft($: Engine, id: string) {
 // (H: 30 x 28, light theme): a thin frame, a grey fill, a small symbol, a red dot top right while
 // their automatic (auto-renew, compact when idle) is on.
 // Cache: the time still left fills the field from the bottom, an abstract hourglass; run out, the
-// symbol turns pale with a small "zz" (the cache sleeps). The symbol: an ice lolly in hairlines.
+// symbol turns pale with a small "zz" (the cache sleeps). The symbol: an ice lolly in hairlines that melts.
 // Context: the context still free fills the field from the bottom (its top sinks as the chat grows);
 // its letter (the mode) takes a colour once the context is this full (percent).
 const C_FIELD_W = 30
@@ -601,53 +620,84 @@ const C_LETTER_GREY = '#5c5c5c'
 const C_PALE_GREY = '#cfcfcf'
 const C_ZZ_GREY = '#b5b5b5'
 const C_DOT_RED = '#e5484d'
-const H_STEPS: readonly (readonly [number, string])[] = [[75, '#e5484d'], [50, '#f08c00'], [33, '#3e7bd6'], [20, '#30a46c']]
+// The context field's fill once the context is this full (percent): pale red, yellow and blue after the
+// app's own context ring (blue #257de0), grey below 25 %.
+const CONTEXT_FILLS: readonly (readonly [number, string])[] = [[75, '#f6c4c5'], [50, '#f7e0a3'], [25, '#c3dbf6']]
 
-function fieldOf(id: string, filled: number, symbol: string, isDot: boolean) {
+function fieldOf(id: string, filled: number, symbol: string, isDot: boolean, fill = C_FIELD_GREY) {
   const w = C_FIELD_W
   const h = C_FIELD_H
   const share = Math.max(0, Math.min(1, filled))
   const top = (h * (1 - share)).toFixed(2)
   return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + w + ' ' + h + '">' +
     '<defs><clipPath id="' + id + '"><rect width="' + w + '" height="' + h + '" rx="' + C_FIELD_R + '"/></clipPath></defs>' +
-    (share > 0 ? '<rect y="' + top + '" width="' + w + '" height="' + h + '" fill="' + C_FIELD_GREY + '" clip-path="url(#' + id + ')"/>' : '') +
+    (share > 0 ? '<rect y="' + top + '" width="' + w + '" height="' + h + '" fill="' + fill + '" clip-path="url(#' + id + ')"/>' : '') +
     '<rect x="0.5" y="0.5" width="' + (w - 1) + '" height="' + (h - 1) + '" rx="' + (C_FIELD_R - 0.5) + '" fill="none" stroke="' +
     C_FIELD_GREY + '" stroke-width="1"/>' + symbol +
     (isDot ? '<circle cx="' + (w - 4.6) + '" cy="4.6" r="2.7" fill="' + C_DOT_RED + '" stroke="#fff" stroke-width="0.8"/>' : '') +
     '</svg>'
 }
 
+// The ice lolly's stages, hairlines on 24 x 24: whole, glaze running, sagging with a drop, a lump over a
+// puddle, and only the puddle once the cache has run out.
+const ICE_STICK = '<path d="M10.8 17.2V21.4A1.2 1.2 0 0 0 13.2 21.4V17.2"/>'
+const ICE_GLINT = '<path d="M14.6 3.6A4.6 4.6 0 0 1 16.8 6.2M16.9 7V7.6"/>'
+const ICE_BODY = '<path d="M6.6 16.2V8A5.4 5.4 0 0 1 17.4 8V16.2A1 1 0 0 1 16.4 17.2H7.6A1 1 0 0 1 6.6 16.2Z"/>'
+const ICE_STAGES = [
+  ICE_BODY + ICE_STICK + ICE_GLINT,
+  ICE_BODY +
+    '<path d="M6.6 10.4C7.2 11.3 8.3 11.2 8.8 10.5C9.4 9.6 10.3 9.6 10.8 10.3' +
+    'C11.5 10.9 12 10.5 12.2 11V14.6A0.9 0.9 0 0 0 14 14.6V10.8C14.2 9.9 15 9.8 15.5 10.4C16 11 16.9 10.8 17.4 9.8"/>' +
+    ICE_STICK + ICE_GLINT,
+  '<path d="M7 16.2V12.4C7 10.6 8.2 9.6 9.4 10.2C10.4 10.7 10.9 9.4 12.2 9.3C13.8 9.2 14.6 10.4 15.4 10.6C16.4 10.9 17 11.8 17 13V16.2A1 1 0 0 1 16 17.2H8A1 1 0 0 1 7 16.2Z"/>' +
+    '<path d="M17 13.4V15.4A0.8 0.8 0 0 0 18.6 15.4V14.8"/>' +
+    '<path d="M18.9 18.6C18.4 19.4 18.6 20.2 19.3 20.2C20 20.2 20.2 19.4 19.7 18.6L19.3 17.9Z"/>' + ICE_STICK,
+  '<path d="M8.4 17.6C7.9 16.2 8.6 14.8 9.8 15C10.4 14.1 11.8 13.9 12.6 14.6C13.6 14.1 15.2 14.6 15.4 15.8C16.2 16.2 16 17.6 15.4 17.6Z"/>' +
+    '<path d="M10.8 17.6V20.6M13.2 17.6V20.6"/><path d="M13.2 18.4V19.4" stroke-width="1.1"/>' +
+    '<ellipse cx="12" cy="21.6" rx="6.6" ry="1.5"/>',
+  '<ellipse cx="12" cy="20.6" rx="8.2" ry="1.9"/>',
+]
+// The stage for the share of the cache time still left.
+const iceStage = (left: number, isExpired: boolean) =>
+  isExpired || left <= 0 ? 4 : left > 0.75 ? 0 : left > 0.5 ? 1 : left > 0.25 ? 2 : 3
+
 function cacheField(minutes: number, isRenew: boolean, isExpired: boolean) {
   const x = isExpired ? 13 : 15
   const colour = isExpired ? C_PALE_GREY : C_LETTER_GREY
-  // An ice lolly in hairlines: rounded top, the glaze running down with a long drip, the stick, a
-  // glint top right (drawn on 24 x 24, scaled in; centred on x).
+  const share = Math.max(0, Math.min(cfg.cacheMinutes, minutes)) / cfg.cacheMinutes
+  // The ice lolly in hairlines, melting with the time left (drawn on 24 x 24, scaled in; centred on x).
   const symbol = '<g transform="translate(' + (x - 12.75) + ' 0.6) scale(1.0625)" fill="none" stroke="' + colour + '" stroke-width="0.72" ' +
-    'stroke-linecap="round" stroke-linejoin="round">' +
-    '<path d="M6.6 16.2V8A5.4 5.4 0 0 1 17.4 8V16.2A1 1 0 0 1 16.4 17.2H7.6A1 1 0 0 1 6.6 16.2Z"/>' +
-    '<path d="M6.6 10.4C7.2 11.3 8.3 11.2 8.8 10.5C9.4 9.6 10.3 9.6 10.8 10.3' +
-    'C11.5 10.9 12 10.5 12.2 11V14.6A0.9 0.9 0 0 0 14 14.6V10.8C14.2 9.9 15 9.8 15.5 10.4C16 11 16.9 10.8 17.4 9.8"/>' +
-    '<path d="M10.8 17.2V21.4A1.2 1.2 0 0 0 13.2 21.4V17.2"/>' +
-    '<path d="M14.6 3.6A4.6 4.6 0 0 1 16.8 6.2M16.9 7V7.6"/></g>' +
+    'stroke-linecap="round" stroke-linejoin="round">' + ICE_STAGES[iceStage(share, isExpired)] + '</g>' +
     (isExpired
       ? '<text x="' + (C_FIELD_W - 8.5) + '" y="9.5" font-family="Segoe UI, system-ui, sans-serif" font-style="italic" font-size="5.5" fill="' + C_ZZ_GREY + '">z</text>' +
         '<text x="' + (C_FIELD_W - 6) + '" y="6.2" font-family="Segoe UI, system-ui, sans-serif" font-style="italic" font-size="4" fill="' + C_PALE_GREY + '">z</text>'
       : '')
-  const left = Math.max(0, Math.min(cfg.cacheMinutes, minutes)) / cfg.cacheMinutes
   // With the "zz" top right the dot would sit on it: it moves to the bottom right then.
-  const svg = fieldOf('cachefield', left, symbol, isRenew && !isExpired)
+  const svg = fieldOf('cachefield', share, symbol, isRenew && !isExpired)
   return isRenew && isExpired
     ? svg.replace('</svg>', '<circle cx="' + (C_FIELD_W - 4.6) + '" cy="' + (C_FIELD_H - 4.6) + '" r="2.7" fill="' + C_DOT_RED + '" stroke="#fff" stroke-width="0.8"/></svg>')
     : svg
 }
 
-// The context button's letter names its mode: C (compact), H (handover), ⤓ (handover, log & clear).
-const CONTEXT_LETTERS: Record<ContextMode, string> = { compact: 'C', handover: 'H', full: '⤓' }
+// The context button's letter names its mode: ⤓ (compact), H (handover), ↗ (handover & new chat); L (handover, log & clear, hidden).
+const CONTEXT_LETTERS: Record<ContextMode, string> = { compact: '⤓', handover: 'H', full: 'L', next: '↗' }
+// Compact, handover and handover & new chat draw a symbol in thin lines instead of their letter (on 24 x 24,
+// scaled into the field): a funnel, an open hand, and a sparkle with a small plus.
+const CONTEXT_DRAWINGS: Partial<Record<ContextMode, string>> = {
+  compact: '<path d="M4 4.5H20L14 12V18.5L10 20.5V12Z"/>',
+  handover: '<path d="M7.6 21.4 C6.2 20.2 5.2 18.4 4.6 16.6 L2.7 12.9 A1.25 1.25 0 0 1 4.9 11.7 L6.7 14.3 V6.2 A1.2 1.2 0 0 1 9.1 6.2 V11.2 V4.4 ' +
+    'A1.2 1.2 0 0 1 11.5 4.4 V11.2 V5.2 A1.2 1.2 0 0 1 13.9 5.2 V11.6 V7.6 A1.2 1.2 0 0 1 16.3 7.6 V14.8 C16.3 18.6 14.6 21.4 11.6 21.4 Z"/>',
+  next: '<path d="M12 3C12.6 8.2 13.8 9.4 19 10C13.8 10.6 12.6 11.8 12 17C11.4 11.8 10.2 10.6 5 10C10.2 9.4 11.4 8.2 12 3Z"/><path d="M18.5 15.5V20.5M16 18H21"/>',
+}
 function contextField(contextPercent: number, isIdle: boolean, mode: ContextMode) {
-  const colour = H_STEPS.find(([least]) => contextPercent >= least)?.[1] ?? C_LETTER_GREY
-  const symbol = '<text x="' + (C_FIELD_W / 2) + '" y="' + (C_FIELD_H / 2) + '" text-anchor="middle" dominant-baseline="central" ' +
-    'font-family="Segoe UI, system-ui, -apple-system, sans-serif" font-size="14" fill="' + colour + '">' + CONTEXT_LETTERS[mode] + '</text>'
-  return fieldOf('contextfield', 1 - contextPercent / 100, symbol, isIdle)
+  const fill = CONTEXT_FILLS.find(([least]) => contextPercent >= least)?.[1] ?? C_FIELD_GREY
+  const drawing = CONTEXT_DRAWINGS[mode]
+  const symbol = drawing !== undefined
+    ? '<g transform="translate(' + (C_FIELD_W / 2 - 9.6) + ' ' + (C_FIELD_H / 2 - 10) + ') scale(0.8)" fill="none" stroke="' + C_LETTER_GREY +
+      '" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round">' + drawing + '</g>'
+    : '<text x="' + (C_FIELD_W / 2) + '" y="' + (C_FIELD_H / 2) + '" text-anchor="middle" dominant-baseline="central" ' +
+      'font-family="Segoe UI, system-ui, -apple-system, sans-serif" font-size="14" fill="' + C_LETTER_GREY + '">' + CONTEXT_LETTERS[mode] + '</text>'
+  return fieldOf('contextfield', 1 - contextPercent / 100, symbol, isIdle, fill)
 }
 
 let minutesShown = 0
@@ -960,6 +1010,8 @@ async function pressButton($: Engine, id: ButtonId) {
     await compact($)
   } else if (contextMode === 'full') {
     await handoff($, lastIsWorking)
+  } else if (contextMode === 'next') {
+    await askNext($)
   } else {
     await askHandover($)
   }
@@ -1096,7 +1148,7 @@ async function handoffBand($: Engine, e: any, ui: any, middle: any) {
       {!isMenu && cfg.compact && buttonOf($, ui, 'compact', 'Cache', cacheField(minutesLeft, isAutoRenew, isExpired), false, C_FIELD_W, C_FIELD_H)}
       {/* After a right click on the context button: its modes, the chosen one at full strength, and the
           compact-when-idle switch. */}
-      {isContextMenu && CONTEXT_MODES.map(mode => (
+      {isContextMenu && SHOWN_MODES.map(mode => (
         <Button key={'cmode-' + mode} label={CONTEXT_MODE_NAMES[mode]} plain dimColor={mode !== contextMode} onPress={() => {
           $.clock.after(0, () => void pickContextMode($, mode))
         }} />
@@ -1764,6 +1816,18 @@ const ICONS: { test: (path: string) => boolean; draw: (colour: string) => string
       `<path d="M8.5 7 L15.5 13 L8.5 19" fill="none" stroke="${c}" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>`,
   },
   {
+    // A spreadsheet or table (Excel, CSV, ODS): an upright hash.
+    test: path => /\.(xlsx?|xlsm|xlsb|csv|tsv|ods)$/i.test(path),
+    draw: c =>
+      `<path fill="none" stroke="${c}" stroke-width="2.0" stroke-linecap="round" d="M9.3 5V20.5M14.7 5V20.5M4.5 10H19.5M4.5 15.5H19.5"/>`,
+  },
+  {
+    // A web page (HTML): two slashes.
+    test: path => /\.(html?|xhtml)$/i.test(path),
+    draw: c =>
+      `<path fill="none" stroke="${c}" stroke-width="2.6" stroke-linecap="round" d="M10.2 5.5 L5.8 20M18.2 5.5 L13.8 20"/>`,
+  },
+  {
     // A log file: a slice of a tree trunk, rings, heart and a crack.
     test: path => /\.log$/i.test(path),
     draw: c =>
@@ -1998,8 +2062,8 @@ const INFO = {
   textRoom: 'How many characters the hover text in the band keeps at least.',
   thumb: 'The thumb sends a short answer as if you had typed it, in the language of the flag. Each language keeps its own text; empty, its default. A right click on the thumb opens these settings.',
   advisor: '⌾ runs /advisor. The model here is the one of new chats; a right click on ⌾ changes it for one chat.',
-  compact: 'The cache button: its grey field is the prompt cache\'s time left, pale with zz once it has run out. A click renews the cache now; a right click turns auto-renew on or off for this chat (a red dot).',
-  handover: 'The context button: its grey field is the context still free; the symbol turns green at 20 %, blue at 33 %, orange at 50 %, red at 75 %. A click runs its mode; a right click shows the modes (Compact, Handover, Handover, Log & Clear) and the switch for compact when idle (a red dot).',
+  compact: 'The cache button: its grey field is the prompt cache\'s time left and the ice lolly melts with it; run out, only a puddle and zz are left. A click renews the cache now; a right click turns auto-renew on or off for this chat (a red dot).',
+  handover: 'The context button: its field is the context still free, grey up to 25 % used, then pale blue, from 50 % yellow, from 75 % red. A click runs its mode; a right click shows the modes (Compact, Handover, Handover & New Chat) and the switch for compact when idle (a red dot).',
   custom: 'A button of your own between ⌾ and the cache. A click opens what "Opens" names: a web address, a file or a folder. When the address does not answer and "Starts if needed" names a command or a .cmd/.bat/.sh file, that runs first, hidden, and the button waits for the address (up to 40 s, an orange dot meanwhile). The symbol is picked from a list. A right click on the button opens these settings.',
   idle: 'Compact when idle: after a reply, with nothing new for these minutes, the chat is compacted if at least this much of its context is used. On or off per chat, with a right click on the context button.',
   cache: 'How long the prompt cache holds after a reply. This only sets the display and auto-renew; it does not change Claude\'s prompt cache.',

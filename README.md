@@ -4,7 +4,7 @@ A band above the prompt for Claude Code (desktop app and terminal):
 
 - a coloured button per path from the latest replies, a small preview for images and videos; left click opens, right click copies the path (Windows, macOS and Linux),
 - a thumb at the band's left end that types "Yes, please",
-- `⌾` for `/advisor`, a custom button of your own that opens an address, file or folder and starts a server first when needed, a cache button (an ice lolly) with the prompt cache's time filling it and an auto-renew that keeps the cache alive, and a context button with the free context filling it that compacts or asks for a handover (Windows for the full handover).
+- `⌾` for `/advisor`, a custom button of your own that opens an address, file or folder and starts a server first when needed, a cache button (an ice lolly) with the prompt cache's time filling it and an auto-renew that keeps the cache alive, and a context button with the free context filling it that compacts, asks for a handover, or has a handover written and the work moved to a new chat.
 
 Each of the thumb, `⌾`, the custom, the cache and the context button can be switched off in the settings. Until version 0.10 the buttons on the right were a mod of their own, `handoff-button`; it is now part of `bright-buttons`.
 
@@ -60,7 +60,7 @@ The buttons show the paths of the latest replies, newest on the left, at most se
 
 In the band:
 - **Images and videos** show as a small, pale black-and-white preview with rounded corners and a bar in their colour at top and bottom. Videos show their frame at one second. The preview is made by `ffmpeg` (looked for in `Program Files\ffmpeg\bin` on Windows, in `/opt/homebrew/bin`, `/usr/local/bin` and `/usr/bin` elsewhere, else on the PATH) as a small JPEG in the temp folder. Without ffmpeg, or until the preview is ready, a symbol stands in.
-- **Symbols** in the path's colour: Blender logo (`.blend`), spiral (Houdini `.hip`, `.hda`, `.otl`), `>` (Python and scripts: `.py`, `.ps1`, `.sh`, `.bat`, `.js`, `.ts`, `.tsx`), tree slice (`.log`), gear (data and settings: `.json`, `.yaml`, `.xml`, `.ini`, `.ocio`), wire cube (3D: `.usd`, `.glb`, `.fbx`, `.obj`, `.abc`), page (`.pdf`), network in a disc (models: `.safetensors`, `.ckpt`, `.pt`, `.gguf`, `.onnx`), two lines (`.md`, `.txt`), folder, film reel (video, until its preview is ready). Other files keep their dot.
+- **Symbols** in the path's colour: Blender logo (`.blend`), spiral (Houdini `.hip`, `.hda`, `.otl`), `>` (Python and scripts: `.py`, `.ps1`, `.sh`, `.bat`, `.js`, `.ts`, `.tsx`), tree slice (`.log`), gear (data and settings: `.json`, `.yaml`, `.xml`, `.ini`, `.ocio`), wire cube (3D: `.usd`, `.glb`, `.fbx`, `.obj`, `.abc`), page (`.pdf`), network in a disc (models: `.safetensors`, `.ckpt`, `.pt`, `.gguf`, `.onnx`), `#` (spreadsheets: `.xlsx`, `.xls`, `.xlsm`, `.xlsb`, `.csv`, `.tsv`, `.ods`), `//` (`.html`, `.htm`, `.xhtml`), two lines (`.md`, `.txt`), folder, film reel (video, until its preview is ready). Other files keep their dot.
 - **Left click** opens the path, **right click** copies the full path to the clipboard ("Path copied" shows for a moment).
 - **Hovering** shows the file name dimmed left of the buttons; a narrow band shows fewer paths so the name keeps its room.
 - **Older paths:** hold the middle mouse button over a path and drag left for older paths of the chat, right for newer ones While older paths show, a grey hand and a dim `+N` count the newer paths left out. A new reply brings the band back to the newest.
@@ -106,8 +106,8 @@ Four buttons on the right of the band and a thumb at its left end. Hovering show
 | --- | --- | --- |
 | `⌾` | runs `/advisor` with the chosen model (the settings' default at first) | shows `Fable Opus Sonnet Haiku` in the band, the other buttons out of the way; a pick turns the advisor on with that model for this chat |
 | custom (Play, or the symbol picked) | opens what **Opens** names. When that is a web address that does not answer and **Starts if needed** is set, it runs that first, hidden and on its own (not tied to Claude), and waits up to 40 seconds for the address, an orange dot on the button meanwhile. Example: `http://localhost:8791` with the `.cmd` that starts its local server. Nothing set: the settings open | opens the settings |
-| cache (ice lolly) | renews the prompt cache now with a short message from the mod ("Cache keep-alive, nothing to do. Reply with just: ok") | turns **auto-renew** on or off for this chat, shown as a red dot at the top right: shortly before the cache clock runs out the same message keeps the cache alive, each costing a cache read and a short reply. The grey field is an abstract hourglass: the cache time still left fills it from the bottom (the hint names the minutes). Once the time is up the symbol turns pale with a small `zz`: the cache sleeps |
-| context (`C`, `H` or `⤓`) | runs its mode: `C` runs `/compact` at once; `H` sends "Bitte schreib ein Handover." as if you had typed it; `⤓` is the full handover (Windows) | shows the three modes in the band, **Compact**, **Handover** and **Handover, Log & Clear**, and a switch for **compact when idle** (a red dot on the button): after a reply, with nothing new typed for the minutes set, the chat is compacted if enough of its context is used. The grey field shows the context still free, sinking from the top as the chat grows; the letter turns green from 20 % context, blue from 33 %, orange from 50 % and red from 75 % (the hint names the percent) |
+| cache (ice lolly) | renews the prompt cache now with a short message from the mod ("Cache keep-alive, nothing to do. Reply with just: ok") | turns **auto-renew** on or off for this chat, shown as a red dot at the top right: shortly before the cache clock runs out the same message keeps the cache alive, each costing a cache read and a short reply. The grey field is an abstract hourglass: the cache time still left fills it from the bottom (the hint names the minutes). The ice lolly melts in four steps as the time runs out: whole, glaze running, sagging, a lump over a puddle. Once the time is up only the puddle is left, pale with a small `zz`: the cache sleeps |
+| context (funnel, open hand or sparkle) | runs its mode: the funnel (**Compact**) runs `/compact` at once; the open hand (**Handover**) sends "Bitte schreib ein Handover." as if you had typed it; the sparkle (**Handover & New Chat**) puts "Handover und neuer Chat (Skill handover-next)." into the prompt box, and Enter sends it | shows the three modes in the band and a switch for **compact when idle** (a red dot on the button): after a reply, with nothing new typed for the minutes set, the chat is compacted if enough of its context is used. The field shows the context still free, sinking from the top as the chat grows: grey up to 25 % used, then pale blue, from 50 % pale yellow, from 75 % pale red (the hint names the percent) |
 | thumb | sends its text in the chosen language, as if you had typed it | opens the settings |
 
 When the band gets narrow, the thumb goes first.
@@ -116,12 +116,14 @@ The advisor model, auto-renew and compact when idle are set per chat: a new chat
 
 A right click on the thumb or `/bright-buttons` opens the settings.
 
-In full handover mode the `⤓` button:
+**Handover & New Chat** needs a skill named `handover-next` (not part of the mod): it writes the handover file, starts a new chat named one letter up (`… [B]` → `… [C]`) in the same group, pinned only if the old chat is, and the new chat reads the handover and asks with buttons whether the old chat is archived, unpinned or left as it is. The sparkle only fills the prompt box, since the desktop app does not start a new chat from a message a mod sent.
+
+The full handover, **Handover, Log & Clear** (Windows), is hidden in the menu for now. It:
 1. exports the chat as `.txt` and `.pdf` to `Documents\Claude Handoffs`,
 2. has a handover written and saves it as `….handoff.md` beside the export,
 3. renames the chat `… [A]`, clears it with `/clear` and starts it as `… [B]` with the handover (kept on disk until the new chat has it, so a restarted chat still gets it),
 4. shows a `<<` button in the new chat that opens the old chat's PDF.
 
-While a reply runs, `H` and `⤓` wait until it is done. If `/compact` does not work, a short message appears.
+While a reply runs, the handover modes wait until it is done. If `/compact` does not work, a short message appears.
 
 `/import-chat` loads an exported chat into the current chat. The PDF is made by Microsoft Edge in the background; without Edge there is no PDF.
